@@ -1,0 +1,202 @@
+const Database = require("better-sqlite3");
+const { v4: uuidv4 } = require("uuid");
+const path = require("path");
+
+const db = new Database(path.join(__dirname, "stylehub.db"));
+
+db.pragma("journal_mode = WAL");
+
+// --- Schema ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL UNIQUE,
+    passwordHash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'customer',
+    createdAt TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS salons (
+    id TEXT PRIMARY KEY,
+    ownerId TEXT,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    address TEXT NOT NULL,
+    distanceKm REAL NOT NULL,
+    rating REAL NOT NULL,
+    reviewCount INTEGER NOT NULL,
+    imageUrl TEXT NOT NULL,
+    openTime TEXT NOT NULL,
+    closeTime TEXT NOT NULL,
+    FOREIGN KEY (ownerId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS services (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    durationMins INTEGER NOT NULL,
+    price REAL NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS reviews (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    customerName TEXT NOT NULL,
+    rating INTEGER NOT NULL,
+    comment TEXT NOT NULL,
+    date TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS bookings (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    salonId TEXT NOT NULL,
+    serviceId TEXT NOT NULL,
+    salonName TEXT NOT NULL,
+    serviceName TEXT NOT NULL,
+    date TEXT NOT NULL,
+    dateLabel TEXT NOT NULL,
+    time TEXT NOT NULL,
+    price REAL NOT NULL,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    FOREIGN KEY (serviceId) REFERENCES services(id)
+  );
+`);
+
+// --- Seed data (only runs if salons table is empty) ---
+const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();
+
+if (salonCount.count === 0) {
+  console.log("Seeding database with mock salon data...");
+
+  const insertSalon = db.prepare(`
+    INSERT INTO salons (id, ownerId, name, category, address, distanceKm, rating, reviewCount, imageUrl, openTime, closeTime)
+    VALUES (@id, @ownerId, @name, @category, @address, @distanceKm, @rating, @reviewCount, @imageUrl, @openTime, @closeTime)
+  `);
+  const insertService = db.prepare(`
+    INSERT INTO services (id, salonId, name, durationMins, price)
+    VALUES (@id, @salonId, @name, @durationMins, @price)
+  `);
+  const insertReview = db.prepare(`
+    INSERT INTO reviews (id, salonId, customerName, rating, comment, date)
+    VALUES (@id, @salonId, @customerName, @rating, @comment, @date)
+  `);
+
+  const seedSalons = [
+    {
+      id: "1",
+      ownerId: null,
+      name: "Glow Studio Accra",
+      category: "Hair Salon",
+      address: "12 Oxford Street, Osu, Accra",
+      distanceKm: 1.2,
+      rating: 4.8,
+      reviewCount: 132,
+      imageUrl: "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800",
+      openTime: "09:00",
+      closeTime: "19:00",
+      services: [
+        { name: "Haircut & Style", durationMins: 45, price: 80 },
+        { name: "Braids (Box Braids)", durationMins: 180, price: 250 },
+        { name: "Wash & Blow Dry", durationMins: 30, price: 50 },
+      ],
+      reviews: [
+        { customerName: "Akosua M.", rating: 5, comment: "Best braiding service in Accra, very neat work.", date: "2026-06-10" },
+        { customerName: "Yaw B.", rating: 4, comment: "Great haircut, friendly staff. Slightly long wait.", date: "2026-06-02" },
+      ],
+    },
+    {
+      id: "2",
+      ownerId: null,
+      name: "Serenity Spa & Wellness",
+      category: "Spa",
+      address: "45 Ring Road Central, Accra",
+      distanceKm: 2.7,
+      rating: 4.9,
+      reviewCount: 87,
+      imageUrl: "https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=800",
+      openTime: "10:00",
+      closeTime: "20:00",
+      services: [
+        { name: "Full Body Massage", durationMins: 60, price: 200 },
+        { name: "Facial Treatment", durationMins: 50, price: 150 },
+        { name: "Hot Stone Therapy", durationMins: 75, price: 280 },
+      ],
+      reviews: [
+        { customerName: "Linda K.", rating: 5, comment: "So relaxing, the hot stone massage was amazing.", date: "2026-06-15" },
+      ],
+    },
+    {
+      id: "3",
+      ownerId: null,
+      name: "Nailed It Studio",
+      category: "Nail Studio",
+      address: "8 Spintex Road, Accra",
+      distanceKm: 3.5,
+      rating: 4.6,
+      reviewCount: 64,
+      imageUrl: "https://images.unsplash.com/photo-1604654894610-df63bc536371?w=800",
+      openTime: "09:30",
+      closeTime: "18:30",
+      services: [
+        { name: "Gel Manicure", durationMins: 40, price: 90 },
+        { name: "Pedicure", durationMins: 45, price: 100 },
+        { name: "Nail Art (Custom)", durationMins: 60, price: 130 },
+      ],
+      reviews: [
+        { customerName: "Esi A.", rating: 5, comment: "Loved my nail art, very detailed and clean.", date: "2026-06-18" },
+        { customerName: "Joana T.", rating: 4, comment: "Good service, slightly pricey but worth it.", date: "2026-05-28" },
+      ],
+    },
+  ];
+
+  const seedAll = db.transaction(() => {
+    for (const salon of seedSalons) {
+      insertSalon.run({
+        id: salon.id,
+        ownerId: salon.ownerId,
+        name: salon.name,
+        category: salon.category,
+        address: salon.address,
+        distanceKm: salon.distanceKm,
+        rating: salon.rating,
+        reviewCount: salon.reviewCount,
+        imageUrl: salon.imageUrl,
+        openTime: salon.openTime,
+        closeTime: salon.closeTime,
+      });
+
+      for (const service of salon.services) {
+        insertService.run({
+          id: uuidv4(),
+          salonId: salon.id,
+          name: service.name,
+          durationMins: service.durationMins,
+          price: service.price,
+        });
+      }
+
+      for (const review of salon.reviews) {
+        insertReview.run({
+          id: uuidv4(),
+          salonId: salon.id,
+          customerName: review.customerName,
+          rating: review.rating,
+          comment: review.comment,
+          date: review.date,
+        });
+      }
+    }
+  });
+
+  seedAll();
+  console.log("Seeding complete.");
+}
+
+module.exports = db;
