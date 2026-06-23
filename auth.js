@@ -6,16 +6,28 @@ const db = require("./db");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
+const OWNER_INVITE_CODE = process.env.OWNER_INVITE_CODE || "";
 
 // --- POST /auth/register ---
 router.post("/register", async (req, res) => {
-  const { name, phone, password, role } = req.body;
+  const { name, phone, password, role, inviteCode } = req.body;
 
   if (!name || !phone || !password) {
     return res.status(400).json({ error: "Name, phone, and password are required" });
   }
 
-  const finalRole = role === "owner" ? "owner" : "customer";
+  const wantsOwner = role === "owner";
+
+  if (wantsOwner) {
+    if (!OWNER_INVITE_CODE) {
+      return res.status(403).json({ error: "Owner sign-up is not available right now" });
+    }
+    if (!inviteCode || inviteCode !== OWNER_INVITE_CODE) {
+      return res.status(403).json({ error: "Invalid owner invite code" });
+    }
+  }
+
+  const finalRole = wantsOwner ? "owner" : "customer";
 
   const existing = db.prepare("SELECT id FROM users WHERE phone = ?").get(phone);
   if (existing) {
