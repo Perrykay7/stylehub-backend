@@ -171,4 +171,74 @@ router.get("/bookings", (req, res) => {
   res.json(bookings);
 });
 
+// --- GET promo codes for one of this owner's salons ---
+router.get("/salons/:salonId/promo-codes", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const promoCodes = db
+    .prepare("SELECT * FROM promo_codes WHERE salonId = ? ORDER BY createdAt DESC")
+    .all(salon.id);
+
+  res.json(promoCodes);
+});
+
+// --- POST create a promo code for one of this owner's salons ---
+router.post("/salons/:salonId/promo-codes", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const { code, discountPercent } = req.body;
+  if (!code || !discountPercent) {
+    return res.status(400).json({ error: "Code and discount percent are required" });
+  }
+  if (discountPercent <= 0 || discountPercent > 100) {
+    return res.status(400).json({ error: "Discount percent must be between 1 and 100" });
+  }
+
+  const normalizedCode = code.trim().toUpperCase();
+
+  const existing = db
+    .prepare("SELECT id FROM promo_codes WHERE salonId = ? AND code = ?")
+    .get(salon.id, normalizedCode);
+  if (existing) {
+    return res.status(409).json({ error: "A promo code with this name already exists for this salon" });
+  }
+
+  const promoCode = {
+    id: uuidv4(),
+    salonId: salon.id,
+    code: normalizedCode,
+    discountPercent,
+    active: 1,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt)
+     VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt)`
+  ).run(promoCode);
+
+  res.status(201).json(promoCode);
+});
+
+// --- DELETE a promo code (only if it belongs to one of this owner's salons) ---
+router.delete("/promo-codes/:id", (req, res) => {
+  const promoCode = db.prepare("SELECT * FROM promo_codes WHERE id = ?").get(req.params.id);
+  if (!promoCode) {
+    return res.status(404).json({ error: "Promo code not found" });
+  }
+
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(promoCode.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(403).json({ error: "Not authorized to delete this promo code" });
+  }
+
+  db.prepare("DELETE FROM promo_codes WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
 module.exports = router;

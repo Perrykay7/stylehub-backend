@@ -12,6 +12,7 @@ db.pragma("journal_mode = WAL");
 
 // --- Schema ---
 db.exec(`
+    
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -72,6 +73,30 @@ db.exec(`
     FOREIGN KEY (serviceId) REFERENCES services(id)
   );
 `);
+// --- Migration: add promo code support ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS promo_codes (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    code TEXT NOT NULL,
+    discountPercent REAL NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+`);
+
+function columnExists(table, column) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  return columns.some((c) => c.name === column);
+}
+
+if (!columnExists("bookings", "originalPrice")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN originalPrice REAL`);
+}
+if (!columnExists("bookings", "discountAmount")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN discountAmount REAL`);
+}
 
 // --- Seed data (only runs if salons table is empty) ---
 const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();

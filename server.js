@@ -89,7 +89,7 @@ app.get("/salons/:id/booked-slots", (req, res) => {
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
-  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price } =
+  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode } =
     req.body;
 
   if (!salonId || !serviceId || !date || !dateLabel || !time) {
@@ -104,6 +104,21 @@ app.post("/bookings", requireAuth, (req, res) => {
     return res.status(409).json({ error: "This time slot was just booked by someone else. Please pick another." });
   }
 
+  let finalPrice = price;
+  let discountAmount = 0;
+
+  if (promoCode) {
+    const normalizedCode = promoCode.trim().toUpperCase();
+    const promo = db
+      .prepare("SELECT * FROM promo_codes WHERE salonId = ? AND code = ? AND active = 1")
+      .get(salonId, normalizedCode);
+
+    if (promo) {
+      discountAmount = Math.round(price * (promo.discountPercent / 100) * 100) / 100;
+      finalPrice = Math.round((price - discountAmount) * 100) / 100;
+    }
+  }
+
   const booking = {
     id: uuidv4(),
     userId: req.userId,
@@ -114,13 +129,15 @@ app.post("/bookings", requireAuth, (req, res) => {
     date,
     dateLabel,
     time,
-    price,
+    price: finalPrice,
+    originalPrice: price,
+    discountAmount,
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
-    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, createdAt)
-     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @createdAt)`
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt)`
   ).run(booking);
 
   res.status(201).json(booking);
@@ -143,7 +160,28 @@ app.get("/bookings", requireAuth, (req, res) => {
     .all(req.userId);
   res.json(bookings);
 });
+// --- POST validate a promo code for a salon ---
+app.post("/promo-codes/validate", requireAuth, (req, res) => {
+  const { salonId, code } = req.body;
+  if (!salonId || !code) {
+    return res.status(400).json({ error: "salonId and code are required" });
+  }
 
+  const normalizedCode = code.trim().toUpperCase();
+
+  const promoCode = db
+    .prepare("SELECT * FROM promo_codes WHERE salonId = ? AND code = ? AND active = 1")
+    .get(salonId, normalizedCode);
+
+  if (!promoCode) {
+    return res.status(404).json({ error: "Invalid or inactive promo code" });
+  }
+
+  res.json({
+    code: promoCode.code,
+    discountPercent: promoCode.discountPercent,
+  });
+});
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`StyleHub backend running on http://0.0.0.0:${PORT}`);
 });
