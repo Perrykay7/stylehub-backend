@@ -113,7 +113,9 @@ app.post("/bookings", requireAuth, (req, res) => {
       .prepare("SELECT * FROM promo_codes WHERE salonId = ? AND code = ? AND active = 1")
       .get(salonId, normalizedCode);
 
-    if (promo) {
+    const isExpired = promo?.expiresAt && new Date(promo.expiresAt) < new Date();
+
+    if (promo && !isExpired) {
       discountAmount = Math.round(price * (promo.discountPercent / 100) * 100) / 100;
       finalPrice = Math.round((price - discountAmount) * 100) / 100;
     }
@@ -175,6 +177,10 @@ app.post("/promo-codes/validate", requireAuth, (req, res) => {
 
   if (!promoCode) {
     return res.status(404).json({ error: "Invalid or inactive promo code" });
+  }
+
+  if (promoCode.expiresAt && new Date(promoCode.expiresAt) < new Date()) {
+    return res.status(400).json({ error: "This promo code has expired" });
   }
 
   res.json({

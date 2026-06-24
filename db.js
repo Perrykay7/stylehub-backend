@@ -97,6 +97,9 @@ if (!columnExists("bookings", "originalPrice")) {
 if (!columnExists("bookings", "discountAmount")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN discountAmount REAL`);
 }
+if (!columnExists("promo_codes", "expiresAt")) {
+  db.exec(`ALTER TABLE promo_codes ADD COLUMN expiresAt TEXT`);
+}
 
 // --- Migration: add password reset support ---
 db.exec(`

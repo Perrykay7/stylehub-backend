@@ -192,7 +192,7 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const { code, discountPercent } = req.body;
+  const { code, discountPercent, expiresAt } = req.body;
   if (!code || !discountPercent) {
     return res.status(400).json({ error: "Code and discount percent are required" });
   }
@@ -216,11 +216,12 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
     discountPercent,
     active: 1,
     createdAt: new Date().toISOString(),
+    expiresAt: expiresAt || null,
   };
 
   db.prepare(
-    `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt)
-     VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt)`
+    `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt, expiresAt)
+     VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt, @expiresAt)`
   ).run(promoCode);
 
   res.status(201).json(promoCode);
