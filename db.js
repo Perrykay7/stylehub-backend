@@ -110,6 +110,17 @@ db.exec(`
   );
 `);
 
+// --- Migration: add targeted promo code recipients ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS promo_code_recipients (
+    id TEXT PRIMARY KEY,
+    promoCodeId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    FOREIGN KEY (promoCodeId) REFERENCES promo_codes(id),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+`);
+
 // --- Seed data (only runs if salons table is empty) ---
 const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();
 

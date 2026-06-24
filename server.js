@@ -115,7 +115,17 @@ app.post("/bookings", requireAuth, (req, res) => {
 
     const isExpired = promo?.expiresAt && new Date(promo.expiresAt) < new Date();
 
-    if (promo && !isExpired) {
+    let isAllowed = true;
+    if (promo) {
+      const recipients = db
+        .prepare("SELECT userId FROM promo_code_recipients WHERE promoCodeId = ?")
+        .all(promo.id);
+      if (recipients.length > 0) {
+        isAllowed = recipients.some((r) => r.userId === req.userId);
+      }
+    }
+
+    if (promo && !isExpired && isAllowed) {
       discountAmount = Math.round(price * (promo.discountPercent / 100) * 100) / 100;
       finalPrice = Math.round((price - discountAmount) * 100) / 100;
     }
@@ -190,6 +200,17 @@ app.post("/promo-codes/validate", requireAuth, (req, res) => {
 
   if (promoCode.expiresAt && new Date(promoCode.expiresAt) < new Date()) {
     return res.status(400).json({ error: "This promo code has expired" });
+  }
+
+  const recipients = db
+    .prepare("SELECT userId FROM promo_code_recipients WHERE promoCodeId = ?")
+    .all(promoCode.id);
+
+  if (recipients.length > 0) {
+    const isAllowed = recipients.some((r) => r.userId === req.userId);
+    if (!isAllowed) {
+      return res.status(403).json({ error: "This promo code isn't available for your account" });
+    }
   }
 
   res.json({

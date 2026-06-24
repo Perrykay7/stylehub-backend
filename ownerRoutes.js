@@ -171,6 +171,26 @@ router.get("/bookings", (req, res) => {
   res.json(bookings);
 });
 
+// --- GET customers who have booked at one of this owner's salons ---
+router.get("/salons/:salonId/customers", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const customers = db
+    .prepare(
+      `SELECT DISTINCT u.id, u.name, u.phone
+       FROM users u
+       INNER JOIN bookings b ON b.userId = u.id
+       WHERE b.salonId = ?
+       ORDER BY u.name`
+    )
+    .all(salon.id);
+
+  res.json(customers);
+});
+
 // --- GET promo codes for one of this owner's salons ---
 router.get("/salons/:salonId/promo-codes", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
@@ -182,7 +202,19 @@ router.get("/salons/:salonId/promo-codes", (req, res) => {
     .prepare("SELECT * FROM promo_codes WHERE salonId = ? ORDER BY createdAt DESC")
     .all(salon.id);
 
-  res.json(promoCodes);
+  const withRecipients = promoCodes.map((promo) => {
+    const recipients = db
+      .prepare(
+        `SELECT u.id, u.name, u.phone
+         FROM promo_code_recipients r
+         INNER JOIN users u ON u.id = r.userId
+         WHERE r.promoCodeId = ?`
+      )
+      .all(promo.id);
+    return { ...promo, recipients };
+  });
+
+  res.json(withRecipients);
 });
 
 // --- POST create a promo code for one of this owner's salons ---
@@ -192,7 +224,7 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const { code, discountPercent, expiresAt } = req.body;
+  const { code, discountPercent, expiresAt, userIds } = req.body;
   if (!code || !discountPercent) {
     return res.status(400).json({ error: "Code and discount percent are required" });
   }
@@ -223,6 +255,15 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
     `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt, expiresAt)
      VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt, @expiresAt)`
   ).run(promoCode);
+
+  if (Array.isArray(userIds) && userIds.length > 0) {
+    const insertRecipient = db.prepare(
+      `INSERT INTO promo_code_recipients (id, promoCodeId, userId) VALUES (?, ?, ?)`
+    );
+    userIds.forEach((userId) => {
+      insertRecipient.run(uuidv4(), promoCode.id, userId);
+    });
+  }
 
   res.status(201).json(promoCode);
 });
