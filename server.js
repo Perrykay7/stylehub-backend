@@ -152,6 +152,15 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     return res.status(404).json({ error: "Booking not found" });
   }
 
+  const appointmentDateTime = new Date(`${booking.date}T${booking.time}:00`);
+  const hoursUntilAppointment = (appointmentDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+
+  if (hoursUntilAppointment < 2) {
+    return res.status(400).json({
+      error: "Bookings can only be cancelled at least 2 hours before the appointment time.",
+    });
+  }
+
   db.prepare("DELETE FROM bookings WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
