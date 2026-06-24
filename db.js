@@ -98,6 +98,15 @@ if (!columnExists("bookings", "discountAmount")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN discountAmount REAL`);
 }
 
+// --- Migration: add password reset support ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS password_resets (
+    phone TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    expiresAt TEXT NOT NULL
+  );
+`);
+
 // --- Seed data (only runs if salons table is empty) ---
 const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();
 

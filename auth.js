@@ -90,4 +90,56 @@ router.post("/login", async (req, res) => {
   });
 });
 
+// --- POST /auth/forgot-password ---
+router.post("/forgot-password", async (req, res) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ error: "Phone number is required" });
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(phone);
+  if (!user) {
+    return res.status(404).json({ error: "No account found with that phone number" });
+  }
+
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+  db.prepare(
+    "INSERT OR REPLACE INTO password_resets (phone, code, expiresAt) VALUES (?, ?, ?)"
+  ).run(phone, code, expiresAt);
+
+  // TODO: replace this console.log with a real SMS send once an SMS provider is set up
+  console.log(`Password reset code for ${phone}: ${code}`);
+
+  res.json({ message: "A reset code has been sent to your phone." });
+});
+
+// --- POST /auth/reset-password ---
+router.post("/reset-password", async (req, res) => {
+  const { phone, code, newPassword } = req.body;
+
+  if (!phone || !code || !newPassword) {
+    return res.status(400).json({ error: "Phone, code, and new password are required" });
+  }
+
+  const resetEntry = db
+    .prepare("SELECT * FROM password_resets WHERE phone = ?")
+    .get(phone);
+
+  if (!resetEntry || resetEntry.code !== code) {
+    return res.status(400).json({ error: "Invalid or expired code" });
+  }
+
+  if (new Date(resetEntry.expiresAt) < new Date()) {
+    return res.status(400).json({ error: "This code has expired. Please request a new one." });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  db.prepare("UPDATE users SET passwordHash = ? WHERE phone = ?").run(passwordHash, phone);
+  db.prepare("DELETE FROM password_resets WHERE phone = ?").run(phone);
+
+  res.json({ message: "Password updated successfully. You can now log in." });
+});
 module.exports = router;
