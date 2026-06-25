@@ -1,6 +1,9 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const authRoutes = require("./auth");
@@ -11,8 +14,47 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- File upload setup ---
+const UPLOADS_DIR = path.join("/data", "uploads", "professionals");
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
+  },
+});
+
+// Serve uploaded images publicly
+app.use("/uploads", express.static(path.join("/data", "uploads")));
+
 const PORT = process.env.PORT || 4001;
 
+// --- POST upload a professional's photo (owner only) ---
+app.post(
+  "/upload/professional-photo",
+  requireAuth,
+  upload.single("photo"),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No photo uploaded" });
+    }
+    const photoUrl = `${req.protocol}://${req.get("host")}/uploads/professionals/${req.file.filename}`;
+    res.json({ photoUrl });
+  }
+);
 // --- Auth routes (public) ---
 app.use("/auth", authRoutes);
 
