@@ -61,13 +61,26 @@ router.delete("/salons/:id", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
+  const promoCodes = db.prepare("SELECT id FROM promo_codes WHERE salonId = ?").all(salon.id);
+  promoCodes.forEach((promo) => {
+    db.prepare("DELETE FROM promo_code_recipients WHERE promoCodeId = ?").run(promo.id);
+  });
+  db.prepare("DELETE FROM promo_codes WHERE salonId = ?").run(salon.id);
+
+  const professionals = db.prepare("SELECT id FROM professionals WHERE salonId = ?").all(salon.id);
+  professionals.forEach((pro) => {
+    db.prepare("DELETE FROM professional_services WHERE professionalId = ?").run(pro.id);
+  });
+  db.prepare("DELETE FROM professionals WHERE salonId = ?").run(salon.id);
+
   db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM salons WHERE id = ?").run(salon.id);
 
   res.json({ deleted: true });
-});// --- PUT update a salon (only if owned by this user) ---
+});
+;// --- PUT update a salon (only if owned by this user) ---
 router.put("/salons/:id", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.id);
   if (!salon || salon.ownerId !== req.userId) {
@@ -361,6 +374,7 @@ router.delete("/promo-codes/:id", (req, res) => {
     return res.status(403).json({ error: "Not authorized to delete this promo code" });
   }
 
+  db.prepare("DELETE FROM promo_code_recipients WHERE promoCodeId = ?").run(req.params.id);
   db.prepare("DELETE FROM promo_codes WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
