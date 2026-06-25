@@ -161,8 +161,10 @@ router.delete("/services/:id", (req, res) => {
 router.get("/bookings", (req, res) => {
   const bookings = db
     .prepare(
-      `SELECT b.* FROM bookings b
+      `SELECT b.*, u.name AS customerName, u.phone AS customerPhone
+       FROM bookings b
        INNER JOIN salons s ON b.salonId = s.id
+       INNER JOIN users u ON b.userId = u.id
        WHERE s.ownerId = ?
        ORDER BY b.createdAt DESC`
     )
