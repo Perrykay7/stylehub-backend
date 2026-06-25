@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
+const { requireAuth } = require("./authMiddleware");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
@@ -141,5 +142,39 @@ router.post("/reset-password", async (req, res) => {
   db.prepare("DELETE FROM password_resets WHERE phone = ?").run(phone);
 
   res.json({ message: "Password updated successfully. You can now log in." });
+});
+// --- DELETE /auth/account ---
+router.delete("/account", requireAuth, async (req, res) => {
+  const userId = req.userId;
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+
+  if (!user) {
+    return res.status(404).json({ error: "Account not found" });
+  }
+
+  // Delete bookings made by this user
+  db.prepare("DELETE FROM bookings WHERE userId = ?").run(userId);
+
+  // If this user owns any salons, cascade-delete everything tied to them
+  const ownedSalons = db.prepare("SELECT id FROM salons WHERE ownerId = ?").all(userId);
+  ownedSalons.forEach((salon) => {
+    const promoCodes = db.prepare("SELECT id FROM promo_codes WHERE salonId = ?").all(salon.id);
+    promoCodes.forEach((promo) => {
+      db.prepare("DELETE FROM promo_code_recipients WHERE promoCodeId = ?").run(promo.id);
+    });
+    db.prepare("DELETE FROM promo_codes WHERE salonId = ?").run(salon.id);
+    db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
+    db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
+    db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salon.id);
+  });
+  db.prepare("DELETE FROM salons WHERE ownerId = ?").run(userId);
+
+  // Clean up any password reset entries
+  db.prepare("DELETE FROM password_resets WHERE phone = ?").run(user.phone);
+
+  // Finally, delete the user
+  db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+
+  res.json({ deleted: true });
 });
 module.exports = router;
