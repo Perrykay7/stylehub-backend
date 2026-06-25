@@ -121,6 +121,30 @@ db.exec(`
   );
 `);
 
+// --- Migration: add professionals ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS professionals (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    photoUrl TEXT,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS professional_services (
+    id TEXT PRIMARY KEY,
+    professionalId TEXT NOT NULL,
+    serviceId TEXT NOT NULL,
+    FOREIGN KEY (professionalId) REFERENCES professionals(id),
+    FOREIGN KEY (serviceId) REFERENCES services(id)
+  );
+`);
+
+if (!columnExists("bookings", "professionalId")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
+}
+
 // --- Seed data (only runs if salons table is empty) ---
 const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();
 

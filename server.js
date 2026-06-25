@@ -73,6 +73,24 @@ app.get("/salons/:id", (req, res) => {
   res.json({ ...salon, rating, reviewCount, services, reviews });
 });
 
+// --- GET professionals at a salon who perform a specific service ---
+app.get("/salons/:id/professionals", (req, res) => {
+  const { serviceId } = req.query;
+  if (!serviceId) {
+    return res.status(400).json({ error: "serviceId query parameter is required" });
+  }
+
+  const professionals = db
+    .prepare(
+      `SELECT p.* FROM professionals p
+       INNER JOIN professional_services ps ON ps.professionalId = p.id
+       WHERE p.salonId = ? AND ps.serviceId = ?`
+    )
+    .all(req.params.id, serviceId);
+
+  res.json(professionals);
+});
+
 // --- GET already-booked time slots for a salon on a specific date ---
 app.get("/salons/:id/booked-slots", (req, res) => {
   const { date } = req.query;
@@ -89,7 +107,7 @@ app.get("/salons/:id/booked-slots", (req, res) => {
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
-  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode } =
+  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId } =
     req.body;
 
   if (!salonId || !serviceId || !date || !dateLabel || !time) {
@@ -102,6 +120,30 @@ app.post("/bookings", requireAuth, (req, res) => {
 
   if (conflict) {
     return res.status(409).json({ error: "This time slot was just booked by someone else. Please pick another." });
+  }
+
+  let finalProfessionalId = professionalId || null;
+
+  if (!finalProfessionalId) {
+    // "No Preference" - auto-assign whichever qualified professional has the fewest bookings that day
+    const qualifiedProfessionals = db
+      .prepare(
+        `SELECT p.id FROM professionals p
+         INNER JOIN professional_services ps ON ps.professionalId = p.id
+         WHERE p.salonId = ? AND ps.serviceId = ?`
+      )
+      .all(salonId, serviceId);
+
+    if (qualifiedProfessionals.length > 0) {
+      const counts = qualifiedProfessionals.map((p) => {
+        const count = db
+          .prepare("SELECT COUNT(*) as count FROM bookings WHERE professionalId = ? AND date = ?")
+          .get(p.id, date);
+        return { id: p.id, count: count.count };
+      });
+      counts.sort((a, b) => a.count - b.count);
+      finalProfessionalId = counts[0].id;
+    }
   }
 
   let finalPrice = price;
@@ -131,7 +173,7 @@ app.post("/bookings", requireAuth, (req, res) => {
     }
   }
 
-  const booking = {
+ const booking = {
     id: uuidv4(),
     userId: req.userId,
     salonId,
@@ -145,11 +187,12 @@ app.post("/bookings", requireAuth, (req, res) => {
     originalPrice: price,
     discountAmount,
     createdAt: new Date().toISOString(),
+    professionalId: finalProfessionalId,
   };
 
   db.prepare(
-    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt)
-     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt)`
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId)`
   ).run(booking);
 
   res.status(201).json(booking);

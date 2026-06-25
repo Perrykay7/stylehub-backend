@@ -193,6 +193,85 @@ router.get("/salons/:salonId/customers", (req, res) => {
   res.json(customers);
 });
 
+// --- GET professionals for one of this owner's salons ---
+router.get("/salons/:salonId/professionals", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const professionals = db
+    .prepare("SELECT * FROM professionals WHERE salonId = ? ORDER BY createdAt DESC")
+    .all(salon.id);
+
+  const withServices = professionals.map((pro) => {
+    const services = db
+      .prepare(
+        `SELECT s.* FROM professional_services ps
+         INNER JOIN services s ON s.id = ps.serviceId
+         WHERE ps.professionalId = ?`
+      )
+      .all(pro.id);
+    return { ...pro, services };
+  });
+
+  res.json(withServices);
+});
+
+// --- POST add a professional to one of this owner's salons ---
+router.post("/salons/:salonId/professionals", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const { name, photoUrl, serviceIds } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: "Name is required" });
+  }
+
+  const professional = {
+    id: uuidv4(),
+    salonId: salon.id,
+    name,
+    photoUrl: photoUrl || null,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    `INSERT INTO professionals (id, salonId, name, photoUrl, createdAt)
+     VALUES (@id, @salonId, @name, @photoUrl, @createdAt)`
+  ).run(professional);
+
+  if (Array.isArray(serviceIds) && serviceIds.length > 0) {
+    const insertLink = db.prepare(
+      `INSERT INTO professional_services (id, professionalId, serviceId) VALUES (?, ?, ?)`
+    );
+    serviceIds.forEach((serviceId) => {
+      insertLink.run(uuidv4(), professional.id, serviceId);
+    });
+  }
+
+  res.status(201).json(professional);
+});
+
+// --- DELETE a professional (only if it belongs to one of this owner's salons) ---
+router.delete("/professionals/:id", (req, res) => {
+  const professional = db.prepare("SELECT * FROM professionals WHERE id = ?").get(req.params.id);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(professional.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(403).json({ error: "Not authorized to delete this professional" });
+  }
+
+  db.prepare("DELETE FROM professional_services WHERE professionalId = ?").run(req.params.id);
+  db.prepare("DELETE FROM professionals WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
+
 // --- GET promo codes for one of this owner's salons ---
 router.get("/salons/:salonId/promo-codes", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
