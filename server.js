@@ -130,7 +130,21 @@ app.get("/salons/:id/professionals", (req, res) => {
     )
     .all(req.params.id, serviceId);
 
-  res.json(professionals);
+  const withRatings = professionals.map((pro) => {
+    const stats = db
+      .prepare(
+        `SELECT AVG(rating) as avgRating, COUNT(*) as ratingCount
+         FROM professional_ratings WHERE professionalId = ?`
+      )
+      .get(pro.id);
+    return {
+      ...pro,
+      avgRating: stats.avgRating ? Math.round(stats.avgRating * 10) / 10 : null,
+      ratingCount: stats.ratingCount,
+    };
+  });
+
+  res.json(withRatings);
 });
 
 // --- GET already-booked time slots for a salon on a specific date ---
@@ -266,6 +280,50 @@ app.get("/bookings", requireAuth, (req, res) => {
     .all(req.userId);
   res.json(bookings);
 });
+
+// --- POST submit a rating for a professional after a completed booking ---
+app.post("/professionals/:id/ratings", requireAuth, (req, res) => {
+  const { bookingId, rating, comment } = req.body;
+  if (!bookingId || !rating) {
+    return res.status(400).json({ error: "bookingId and rating are required" });
+  }
+  if (rating < 1 || rating > 5) {
+    return res.status(400).json({ error: "Rating must be between 1 and 5" });
+  }
+
+  const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+  if (!booking || booking.userId !== req.userId) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+  if (booking.professionalId !== req.params.id) {
+    return res.status(400).json({ error: "This booking is not associated with this professional" });
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM professional_ratings WHERE bookingId = ?")
+    .get(bookingId);
+  if (existing) {
+    return res.status(409).json({ error: "You have already rated this booking" });
+  }
+
+  const newRating = {
+    id: uuidv4(),
+    professionalId: req.params.id,
+    bookingId,
+    userId: req.userId,
+    rating,
+    comment: comment || null,
+    createdAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    `INSERT INTO professional_ratings (id, professionalId, bookingId, userId, rating, comment, createdAt)
+     VALUES (@id, @professionalId, @bookingId, @userId, @rating, @comment, @createdAt)`
+  ).run(newRating);
+
+  res.status(201).json(newRating);
+});
+
 // --- POST validate a promo code for a salon ---
 app.post("/promo-codes/validate", requireAuth, (req, res) => {
   const { salonId, code } = req.body;

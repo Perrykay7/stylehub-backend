@@ -141,6 +141,22 @@ db.exec(`
   );
 `);
 
+// --- Migration: add professional ratings ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS professional_ratings (
+    id TEXT PRIMARY KEY,
+    professionalId TEXT NOT NULL,
+    bookingId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    rating INTEGER NOT NULL,
+    comment TEXT,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (professionalId) REFERENCES professionals(id),
+    FOREIGN KEY (bookingId) REFERENCES bookings(id),
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+`);
+
 if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
