@@ -73,6 +73,10 @@ router.delete("/salons/:id", (req, res) => {
   });
   db.prepare("DELETE FROM professionals WHERE salonId = ?").run(salon.id);
 
+  const salonServices = db.prepare("SELECT id FROM services WHERE salonId = ?").all(salon.id);
+  salonServices.forEach((s) => {
+    db.prepare("DELETE FROM professional_services WHERE serviceId = ?").run(s.id);
+  });
   db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salon.id);
@@ -166,6 +170,7 @@ router.delete("/services/:id", (req, res) => {
     return res.status(403).json({ error: "Not authorized to delete this service" });
   }
 
+  db.prepare("DELETE FROM professional_services WHERE serviceId = ?").run(req.params.id);
   db.prepare("DELETE FROM services WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
