@@ -77,11 +77,10 @@ router.delete("/salons/:id", (req, res) => {
   salonServices.forEach((s) => {
     db.prepare("DELETE FROM professional_services WHERE serviceId = ?").run(s.id);
   });
-  db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
-  db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salon.id);
+  db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
+  db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM salons WHERE id = ?").run(salon.id);
-
   res.json({ deleted: true });
 });
 ;// --- PUT update a salon (only if owned by this user) ---
