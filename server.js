@@ -273,10 +273,18 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
   db.prepare("DELETE FROM bookings WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
+
 // --- GET bookings for the logged-in user only ---
 app.get("/bookings", requireAuth, (req, res) => {
   const bookings = db
-    .prepare("SELECT * FROM bookings WHERE userId = ? ORDER BY createdAt DESC")
+    .prepare(
+      `SELECT b.*, p.name AS professionalName,
+       (SELECT COUNT(*) FROM professional_ratings WHERE bookingId = b.id) AS hasRating
+       FROM bookings b
+       LEFT JOIN professionals p ON b.professionalId = p.id
+       WHERE b.userId = ?
+       ORDER BY b.createdAt DESC`
+    )
     .all(req.userId);
   res.json(bookings);
 });
