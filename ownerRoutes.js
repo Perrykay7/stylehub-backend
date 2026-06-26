@@ -178,7 +178,8 @@ router.delete("/services/:id", (req, res) => {
 router.get("/bookings", (req, res) => {
   const bookings = db
     .prepare(
-      `SELECT b.*, u.name AS customerName, u.phone AS customerPhone, p.name AS professionalName
+      `SELECT b.*, u.name AS customerName, u.phone AS customerPhone, p.name AS professionalName,
+       (SELECT COUNT(*) FROM bookings b2 WHERE b2.userId = b.userId AND b2.salonId = b.salonId) AS customerVisitCount
        FROM bookings b
        INNER JOIN salons s ON b.salonId = s.id
        INNER JOIN users u ON b.userId = u.id
@@ -200,10 +201,11 @@ router.get("/salons/:salonId/customers", (req, res) => {
 
   const customers = db
     .prepare(
-      `SELECT DISTINCT u.id, u.name, u.phone
+      `SELECT u.id, u.name, u.phone, COUNT(b.id) AS bookingCount
        FROM users u
        INNER JOIN bookings b ON b.userId = u.id
        WHERE b.salonId = ?
+       GROUP BY u.id
        ORDER BY u.name`
     )
     .all(salon.id);
