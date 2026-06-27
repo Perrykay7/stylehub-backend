@@ -55,6 +55,41 @@ app.post(
     res.json({ photoUrl });
   }
 );
+// --- POST upload a salon's photo (owner only) ---
+const salonUploadsDir = path.join("/data", "uploads", "salons");
+fs.mkdirSync(salonUploadsDir, { recursive: true });
+
+const salonStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, salonUploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const salonUpload = multer({
+  storage: salonStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
+  },
+});
+
+app.post(
+  "/upload/salon-photo",
+  requireAuth,
+  salonUpload.single("photo"),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No photo uploaded" });
+    }
+    const photoUrl = `${req.protocol}://${req.get("host")}/uploads/salons/${req.file.filename}`;
+    res.json({ photoUrl });
+  }
+);
 // --- Auth routes (public) ---
 app.use("/auth", authRoutes);
 
