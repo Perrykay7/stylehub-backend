@@ -44,11 +44,12 @@ router.post("/salons", (req, res) => {
     imageUrl: imageUrl || "https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800",
     openTime,
     closeTime,
+    createdAt: new Date().toISOString(),
   };
 
   db.prepare(
-    `INSERT INTO salons (id, ownerId, name, category, address, distanceKm, rating, reviewCount, imageUrl, openTime, closeTime)
-     VALUES (@id, @ownerId, @name, @category, @address, @distanceKm, @rating, @reviewCount, @imageUrl, @openTime, @closeTime)`
+    `INSERT INTO salons (id, ownerId, name, category, address, distanceKm, rating, reviewCount, imageUrl, openTime, closeTime, createdAt)
+     VALUES (@id, @ownerId, @name, @category, @address, @distanceKm, @rating, @reviewCount, @imageUrl, @openTime, @closeTime, @createdAt)`
   ).run(salon);
 
   res.status(201).json(salon);

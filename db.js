@@ -169,6 +169,12 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Migration: add createdAt to salons ---
+if (!columnExists("salons", "createdAt")) {
+  db.exec(`ALTER TABLE salons ADD COLUMN createdAt TEXT`);
+  db.exec(`UPDATE salons SET createdAt = '2020-01-01T00:00:00.000Z' WHERE createdAt IS NULL`);
+}
+
 // --- Migration: add ownerCode column to users ---
 if (!columnExists("users", "ownerCode")) {
   db.exec(`ALTER TABLE users ADD COLUMN ownerCode TEXT`);

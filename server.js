@@ -98,7 +98,7 @@ app.use("/owner", ownerRoutes);
 
 // --- GET all salons (with services and reviews nested, rating computed live) ---
 app.get("/salons", (req, res) => {
-  const salons = db.prepare("SELECT * FROM salons").all();
+  const salons = db.prepare("SELECT * FROM salons ORDER BY createdAt DESC").all();
 
   const fullSalons = salons.map((salon) => {
     const services = db
