@@ -169,6 +169,26 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Migration: add ownerCode column to users ---
+if (!columnExists("users", "ownerCode")) {
+  db.exec(`ALTER TABLE users ADD COLUMN ownerCode TEXT`);
+}
+
+// --- Settings table for runtime-configurable values ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`);
+
+// Seed the invite code from env if not already in DB
+const existingCode = db.prepare("SELECT value FROM settings WHERE key = 'owner_invite_code'").get();
+if (!existingCode) {
+  const initialCode = process.env.OWNER_INVITE_CODE || "";
+  db.prepare("INSERT INTO settings (key, value) VALUES ('owner_invite_code', ?)").run(initialCode);
+}
+
 // --- Ensure a placeholder "guest" user exists for manual/walk-in bookings ---
 const guestUser = db.prepare("SELECT id FROM users WHERE id = ?").get("guest");
 if (!guestUser) {

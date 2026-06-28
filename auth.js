@@ -7,7 +7,12 @@ const { requireAuth } = require("./authMiddleware");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
-const OWNER_INVITE_CODE = process.env.OWNER_INVITE_CODE || "";
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+
+function getCurrentInviteCode() {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'owner_invite_code'").get();
+  return row ? row.value : "";
+}
 
 // --- POST /auth/register ---
 router.post("/register", async (req, res) => {
@@ -20,10 +25,11 @@ router.post("/register", async (req, res) => {
   const wantsOwner = role === "owner";
 
   if (wantsOwner) {
-    if (!OWNER_INVITE_CODE) {
+    const currentCode = getCurrentInviteCode();
+    if (!currentCode) {
       return res.status(403).json({ error: "Owner sign-up is not available right now" });
     }
-    if (!inviteCode || inviteCode !== OWNER_INVITE_CODE) {
+    if (!inviteCode || inviteCode !== currentCode) {
       return res.status(403).json({ error: "Invalid owner invite code" });
     }
   }
@@ -42,11 +48,12 @@ router.post("/register", async (req, res) => {
     phone,
     passwordHash,
     role: finalRole,
+    ownerCode: wantsOwner ? getCurrentInviteCode() : null,
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
-    `INSERT INTO users (id, name, phone, passwordHash, role, createdAt) VALUES (@id, @name, @phone, @passwordHash, @role, @createdAt)`
+    `INSERT INTO users (id, name, phone, passwordHash, role, ownerCode, createdAt) VALUES (@id, @name, @phone, @passwordHash, @role, @ownerCode, @createdAt)`
   ).run(user);
 
   const token = jwt.sign(
@@ -177,4 +184,54 @@ router.delete("/account", requireAuth, async (req, res) => {
 
   res.json({ deleted: true });
 });
+// --- PUT /auth/admin/invite-code — update referral code, downgrade unverified owners ---
+router.put("/admin/invite-code", (req, res) => {
+  const { newCode } = req.body;
+  const secret = req.headers["x-admin-secret"];
+
+  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  if (!newCode || typeof newCode !== "string" || !newCode.trim()) {
+    return res.status(400).json({ error: "newCode is required" });
+  }
+
+  const code = newCode.trim();
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('owner_invite_code', ?)").run(code);
+
+  // Downgrade owners who verified with the old code
+  const downgraded = db.prepare(
+    "UPDATE users SET role = 'customer' WHERE role = 'owner' AND (ownerCode IS NULL OR ownerCode != ?)"
+  ).run(code);
+
+  res.json({ message: "Invite code updated", ownersDowngraded: downgraded.changes });
+});
+
+// --- POST /auth/reverify-owner — lets an existing account re-verify with the new code ---
+router.post("/reverify-owner", requireAuth, (req, res) => {
+  const { inviteCode } = req.body;
+  const currentCode = getCurrentInviteCode();
+
+  if (!currentCode) {
+    return res.status(403).json({ error: "Owner sign-up is not available right now" });
+  }
+  if (!inviteCode || inviteCode !== currentCode) {
+    return res.status(403).json({ error: "Invalid owner invite code" });
+  }
+
+  db.prepare("UPDATE users SET role = 'owner', ownerCode = ? WHERE id = ?").run(currentCode, req.userId);
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.userId);
+  const token = jwt.sign(
+    { userId: user.id, name: user.name, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  res.json({
+    token,
+    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+  });
+});
+
 module.exports = router;
