@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const db = require("./db");
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
 
@@ -23,7 +24,8 @@ function requireAuth(req, res, next) {
 }
 
 function requireOwner(req, res, next) {
-  if (req.userRole !== "owner") {
+  const user = db.prepare("SELECT role FROM users WHERE id = ?").get(req.userId);
+  if (!user || user.role !== "owner") {
     return res.status(403).json({ error: "Only salon owners can perform this action" });
   }
   next();
