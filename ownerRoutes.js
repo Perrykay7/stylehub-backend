@@ -174,22 +174,86 @@ router.delete("/services/:id", (req, res) => {
   res.json({ deleted: true });
 });
 
+// --- POST create a manual booking on behalf of a walk-in/phone customer ---
+router.post("/salons/:salonId/manual-booking", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const {
+    serviceId,
+    serviceName,
+    date,
+    dateLabel,
+    time,
+    price,
+    guestName,
+    guestPhone,
+    professionalId,
+  } = req.body;
+
+  if (!serviceId || !serviceName || !date || !dateLabel || !time || price == null || !guestName) {
+    return res.status(400).json({ error: "Missing required booking fields" });
+  }
+
+  const conflict = db
+    .prepare("SELECT id FROM bookings WHERE salonId = ? AND date = ? AND time = ?")
+    .get(salon.id, date, time);
+
+  if (conflict) {
+    return res.status(409).json({ error: "This time slot is already booked." });
+  }
+
+  const booking = {
+    id: uuidv4(),
+    userId: "",
+    salonId: salon.id,
+    serviceId,
+    salonName: salon.name,
+    serviceName,
+    date,
+    dateLabel,
+    time,
+    price,
+    originalPrice: price,
+    discountAmount: 0,
+    createdAt: new Date().toISOString(),
+    professionalId: professionalId || null,
+    guestName,
+    guestPhone: guestPhone || null,
+  };
+
+  db.prepare(
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, guestName, guestPhone)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @guestName, @guestPhone)`
+  ).run(booking);
+
+  res.status(201).json(booking);
+});
+
 // --- GET bookings for all of this owner's salons ---
 router.get("/bookings", (req, res) => {
   const bookings = db
     .prepare(
-      `SELECT b.*, u.name AS customerName, u.phone AS customerPhone, p.name AS professionalName,
-       (SELECT COUNT(*) FROM bookings b2 WHERE b2.userId = b.userId AND b2.salonId = b.salonId) AS customerVisitCount
+      `SELECT b.*, u.name AS userName, u.phone AS userPhone, p.name AS professionalName,
+       (SELECT COUNT(*) FROM bookings b2 WHERE b2.userId = b.userId AND b2.salonId = b.salonId AND b.userId != '') AS customerVisitCount
        FROM bookings b
        INNER JOIN salons s ON b.salonId = s.id
-       INNER JOIN users u ON b.userId = u.id
+       LEFT JOIN users u ON b.userId = u.id
        LEFT JOIN professionals p ON b.professionalId = p.id
        WHERE s.ownerId = ?
        ORDER BY b.createdAt DESC`
     )
     .all(req.userId);
 
-  res.json(bookings);
+  const withDisplayInfo = bookings.map((b) => ({
+    ...b,
+    customerName: b.userId ? b.userName : b.guestName,
+    customerPhone: b.userId ? b.userPhone : b.guestPhone,
+  }));
+
+  res.json(withDisplayInfo);
 });
 
 // --- GET customers who have booked at one of this owner's salons ---

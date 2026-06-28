@@ -157,6 +157,14 @@ db.exec(`
   );
 `);
 
+// --- Migration: add guest booking support (for owner-created manual bookings) ---
+if (!columnExists("bookings", "guestName")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN guestName TEXT`);
+}
+if (!columnExists("bookings", "guestPhone")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN guestPhone TEXT`);
+}
+
 if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
