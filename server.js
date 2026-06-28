@@ -231,20 +231,59 @@ app.get("/salons/:id/professionals", (req, res) => {
 
 // --- GET already-booked time slots for a salon on a specific date ---
 app.get("/salons/:id/booked-slots", (req, res) => {
-  const { date } = req.query;
+  const { date, serviceId } = req.query;
   if (!date) {
     return res.status(400).json({ error: "date query parameter is required" });
   }
-
-  const booked = db
-    .prepare("SELECT time FROM bookings WHERE salonId = ? AND date = ?")
-    .all(req.params.id, date);
 
   const blocked = db
     .prepare("SELECT time FROM blocked_slots WHERE salonId = ? AND date = ?")
     .all(req.params.id, date);
 
-  const allUnavailable = [...new Set([...booked.map((r) => r.time), ...blocked.map((r) => r.time)])];
+  let fullTimes = [];
+
+  if (serviceId) {
+    // Get professionals who can perform this service at this salon
+    const pros = db
+      .prepare(
+        `SELECT p.id FROM professionals p
+         INNER JOIN professional_services ps ON ps.professionalId = p.id
+         WHERE p.salonId = ? AND ps.serviceId = ?`
+      )
+      .all(req.params.id, serviceId);
+
+    if (pros.length > 0) {
+      // A slot is full only when ALL professionals for this service are booked at that time
+      const placeholders = pros.map(() => "?").join(",");
+      const proIds = pros.map((p) => p.id);
+      const bookedAtTimes = db
+        .prepare(
+          `SELECT time, COUNT(DISTINCT professionalId) as bookedCount
+           FROM bookings
+           WHERE salonId = ? AND date = ? AND professionalId IN (${placeholders})
+           GROUP BY time`
+        )
+        .all(req.params.id, date, ...proIds);
+
+      fullTimes = bookedAtTimes
+        .filter((r) => r.bookedCount >= pros.length)
+        .map((r) => r.time);
+    } else {
+      // No professionals set up — fall back to one-per-slot
+      fullTimes = db
+        .prepare("SELECT time FROM bookings WHERE salonId = ? AND date = ?")
+        .all(req.params.id, date)
+        .map((r) => r.time);
+    }
+  } else {
+    // No serviceId provided — fall back to one-per-slot
+    fullTimes = db
+      .prepare("SELECT time FROM bookings WHERE salonId = ? AND date = ?")
+      .all(req.params.id, date)
+      .map((r) => r.time);
+  }
+
+  const allUnavailable = [...new Set([...fullTimes, ...blocked.map((r) => r.time)])];
   res.json(allUnavailable);
 });
 
@@ -276,36 +315,64 @@ app.post("/bookings", requireAuth, (req, res) => {
     return res.status(400).json({ error: "Missing required booking fields" });
   }
 
-  const conflict = db
-    .prepare("SELECT id FROM bookings WHERE salonId = ? AND date = ? AND time = ?")
-    .get(salonId, date, time);
-
-  if (conflict) {
-    return res.status(409).json({ error: "This time slot was just booked by someone else. Please pick another." });
-  }
+  // Get professionals who can perform this service
+  const qualifiedProfessionals = db
+    .prepare(
+      `SELECT p.id FROM professionals p
+       INNER JOIN professional_services ps ON ps.professionalId = p.id
+       WHERE p.salonId = ? AND ps.serviceId = ?`
+    )
+    .all(salonId, serviceId);
 
   let finalProfessionalId = professionalId || null;
 
-  if (!finalProfessionalId) {
-    // "No Preference" - auto-assign whichever qualified professional has the fewest bookings that day
-    const qualifiedProfessionals = db
-      .prepare(
-        `SELECT p.id FROM professionals p
-         INNER JOIN professional_services ps ON ps.professionalId = p.id
-         WHERE p.salonId = ? AND ps.serviceId = ?`
-      )
-      .all(salonId, serviceId);
-
-    if (qualifiedProfessionals.length > 0) {
-      const counts = qualifiedProfessionals.map((p) => {
-        const count = db
-          .prepare("SELECT COUNT(*) as count FROM bookings WHERE professionalId = ? AND date = ?")
-          .get(p.id, date);
-        return { id: p.id, count: count.count };
-      });
-      counts.sort((a, b) => a.count - b.count);
-      finalProfessionalId = counts[0].id;
+  if (qualifiedProfessionals.length === 0) {
+    // No professionals configured — one booking per slot
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE salonId = ? AND date = ? AND time = ?")
+      .get(salonId, date, time);
+    if (conflict) {
+      return res.status(409).json({ error: "This time slot was just booked by someone else. Please pick another." });
     }
+  } else if (finalProfessionalId) {
+    // Customer picked a specific professional — check that professional is free
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+      .get(finalProfessionalId, date, time);
+    if (conflict) {
+      return res.status(409).json({ error: "That professional is no longer available at this time. Please choose another." });
+    }
+  } else {
+    // "No Preference" — check if all professionals for this service are fully booked at this time
+    const proIds = qualifiedProfessionals.map((p) => p.id);
+    const placeholders = proIds.map(() => "?").join(",");
+    const bookedCount = db
+      .prepare(
+        `SELECT COUNT(DISTINCT professionalId) as count FROM bookings
+         WHERE salonId = ? AND date = ? AND time = ? AND professionalId IN (${placeholders})`
+      )
+      .get(salonId, date, time, ...proIds);
+
+    if (bookedCount.count >= proIds.length) {
+      return res.status(409).json({ error: "This time slot is fully booked. Please pick another." });
+    }
+
+    // Auto-assign the professional with fewest bookings today who is free at this time
+    const available = qualifiedProfessionals.filter((p) => {
+      const alreadyBooked = db
+        .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+        .get(p.id, date, time);
+      return !alreadyBooked;
+    });
+
+    const counts = available.map((p) => {
+      const count = db
+        .prepare("SELECT COUNT(*) as count FROM bookings WHERE professionalId = ? AND date = ?")
+        .get(p.id, date);
+      return { id: p.id, count: count.count };
+    });
+    counts.sort((a, b) => a.count - b.count);
+    finalProfessionalId = counts[0]?.id || null;
   }
 
   let finalPrice = price;
