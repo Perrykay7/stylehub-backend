@@ -234,4 +234,46 @@ router.post("/reverify-owner", requireAuth, (req, res) => {
   });
 });
 
+// --- PUT /auth/profile — update name and/or phone ---
+router.put("/profile", requireAuth, async (req, res) => {
+  const { name, phone, currentPassword, newPassword } = req.body;
+
+  if (!name && !phone && !newPassword) {
+    return res.status(400).json({ error: "Nothing to update" });
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  if (phone && phone !== user.phone) {
+    const existing = db.prepare("SELECT id FROM users WHERE phone = ? AND id != ?").get(phone, req.userId);
+    if (existing) return res.status(409).json({ error: "That phone number is already in use" });
+  }
+
+  let passwordHash = user.passwordHash;
+  if (newPassword) {
+    if (!currentPassword) return res.status(400).json({ error: "Current password is required to set a new one" });
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
+    passwordHash = await bcrypt.hash(newPassword, 10);
+  }
+
+  const updatedName = name || user.name;
+  const updatedPhone = phone || user.phone;
+
+  db.prepare("UPDATE users SET name = ?, phone = ?, passwordHash = ? WHERE id = ?")
+    .run(updatedName, updatedPhone, passwordHash, req.userId);
+
+  const token = jwt.sign(
+    { userId: req.userId, name: updatedName, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  res.json({
+    token,
+    user: { id: req.userId, name: updatedName, phone: updatedPhone, role: user.role },
+  });
+});
+
 module.exports = router;
