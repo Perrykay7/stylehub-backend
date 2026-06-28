@@ -207,7 +207,7 @@ router.post("/salons/:salonId/manual-booking", (req, res) => {
 
   const booking = {
     id: uuidv4(),
-    userId: "",
+    userId: "guest",
     salonId: salon.id,
     serviceId,
     salonName: salon.name,
@@ -237,7 +237,7 @@ router.get("/bookings", (req, res) => {
   const bookings = db
     .prepare(
       `SELECT b.*, u.name AS userName, u.phone AS userPhone, p.name AS professionalName,
-       (SELECT COUNT(*) FROM bookings b2 WHERE b2.userId = b.userId AND b2.salonId = b.salonId AND b.userId != '') AS customerVisitCount
+       (SELECT COUNT(*) FROM bookings b2 WHERE b2.userId = b.userId AND b2.salonId = b.salonId AND b.userId != 'guest') AS customerVisitCount
        FROM bookings b
        INNER JOIN salons s ON b.salonId = s.id
        LEFT JOIN users u ON b.userId = u.id
@@ -249,8 +249,8 @@ router.get("/bookings", (req, res) => {
 
   const withDisplayInfo = bookings.map((b) => ({
     ...b,
-    customerName: b.userId ? b.userName : b.guestName,
-    customerPhone: b.userId ? b.userPhone : b.guestPhone,
+    customerName: b.userId === "guest" ? b.guestName : b.userName,
+    customerPhone: b.userId === "guest" ? b.guestPhone : b.userPhone,
   }));
 
   res.json(withDisplayInfo);

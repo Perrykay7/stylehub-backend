@@ -169,6 +169,15 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Ensure a placeholder "guest" user exists for manual/walk-in bookings ---
+const guestUser = db.prepare("SELECT id FROM users WHERE id = ?").get("guest");
+if (!guestUser) {
+  db.prepare(
+    `INSERT INTO users (id, name, phone, passwordHash, role, createdAt)
+     VALUES ('guest', 'Walk-in Guest', '0000000000', 'no-login', 'customer', ?)`
+  ).run(new Date().toISOString());
+}
+
 // --- Seed data (only runs if salons table is empty) ---
 const salonCount = db.prepare("SELECT COUNT(*) as count FROM salons").get();
 
