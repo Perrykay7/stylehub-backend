@@ -450,4 +450,60 @@ router.delete("/promo-codes/:id", (req, res) => {
   db.prepare("DELETE FROM promo_codes WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
+
+// --- GET dashboard stats for this owner ---
+router.get("/stats", (req, res) => {
+  const salons = db.prepare("SELECT id FROM salons WHERE ownerId = ?").all(req.userId);
+  const salonIds = salons.map((s) => s.id);
+
+  if (salonIds.length === 0) {
+    return res.json({ totalBookings: 0, totalRevenue: 0, totalCustomers: 0, topServices: [], recentBookings: [] });
+  }
+
+  const placeholders = salonIds.map(() => "?").join(",");
+
+  const totalBookings = db.prepare(
+    `SELECT COUNT(*) as count FROM bookings WHERE salonId IN (${placeholders})`
+  ).get(...salonIds).count;
+
+  const totalRevenue = db.prepare(
+    `SELECT COALESCE(SUM(price), 0) as total FROM bookings WHERE salonId IN (${placeholders})`
+  ).get(...salonIds).total;
+
+  const totalCustomers = db.prepare(
+    `SELECT COUNT(DISTINCT userId) as count FROM bookings WHERE salonId IN (${placeholders}) AND userId != 'guest'`
+  ).get(...salonIds).count;
+
+  const topServices = db.prepare(
+    `SELECT serviceName, COUNT(*) as bookingCount, SUM(price) as revenue
+     FROM bookings WHERE salonId IN (${placeholders})
+     GROUP BY serviceName ORDER BY bookingCount DESC LIMIT 5`
+  ).all(...salonIds);
+
+  const recentBookings = db.prepare(
+    `SELECT b.salonName, b.serviceName, b.dateLabel, b.time, b.price,
+            COALESCE(u.name, b.guestName) as customerName
+     FROM bookings b
+     LEFT JOIN users u ON b.userId = u.id
+     WHERE b.salonId IN (${placeholders})
+     ORDER BY b.createdAt DESC LIMIT 5`
+  ).all(...salonIds);
+
+  const thisMonth = new Date();
+  thisMonth.setDate(1);
+  thisMonth.setHours(0, 0, 0, 0);
+
+  const monthlyRevenue = db.prepare(
+    `SELECT COALESCE(SUM(price), 0) as total FROM bookings
+     WHERE salonId IN (${placeholders}) AND createdAt >= ?`
+  ).get(...salonIds, thisMonth.toISOString()).total;
+
+  const monthlyBookings = db.prepare(
+    `SELECT COUNT(*) as count FROM bookings
+     WHERE salonId IN (${placeholders}) AND createdAt >= ?`
+  ).get(...salonIds, thisMonth.toISOString()).count;
+
+  res.json({ totalBookings, totalRevenue, totalCustomers, topServices, recentBookings, monthlyRevenue, monthlyBookings });
+});
+
 module.exports = router;
