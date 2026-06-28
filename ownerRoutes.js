@@ -2,6 +2,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
+const { sendPushNotification } = require("./pushHelper");
 
 const router = express.Router();
 
@@ -115,7 +116,7 @@ router.post("/salons/:salonId/services", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const { name, durationMins, price } = req.body;
+  const { name, durationMins, price, category } = req.body;
   if (!name || !durationMins || price == null) {
     return res.status(400).json({ error: "Missing required service fields" });
   }
@@ -126,10 +127,11 @@ router.post("/salons/:salonId/services", (req, res) => {
     name,
     durationMins,
     price,
+    category: category || null,
   };
 
   db.prepare(
-    `INSERT INTO services (id, salonId, name, durationMins, price) VALUES (@id, @salonId, @name, @durationMins, @price)`
+    `INSERT INTO services (id, salonId, name, durationMins, price, category) VALUES (@id, @salonId, @name, @durationMins, @price, @category)`
   ).run(service);
 
   res.status(201).json(service);
@@ -147,16 +149,16 @@ router.put("/services/:id", (req, res) => {
     return res.status(403).json({ error: "Not authorized to edit this service" });
   }
 
-  const { name, durationMins, price } = req.body;
+  const { name, durationMins, price, category } = req.body;
   if (!name || !durationMins || price == null) {
     return res.status(400).json({ error: "Missing required service fields" });
   }
 
   db.prepare(
-    "UPDATE services SET name = ?, durationMins = ?, price = ? WHERE id = ?"
-  ).run(name, durationMins, price, req.params.id);
+    "UPDATE services SET name = ?, durationMins = ?, price = ?, category = ? WHERE id = ?"
+  ).run(name, durationMins, price, category || null, req.params.id);
 
-  res.json({ ...service, name, durationMins, price });
+  res.json({ ...service, name, durationMins, price, category: category || null });
 });
 // --- DELETE a service (only if it belongs to one of this owner's salons) ---
 router.delete("/services/:id", (req, res) => {
@@ -593,6 +595,31 @@ router.get("/stats", (req, res) => {
   ).get(...salonIds);
 
   res.json({ totalBookings, totalRevenue, totalCustomers, topServices, recentBookings, monthlyRevenue, monthlyBookings, recentReviews, avgRating: Math.round(avgRating.avg * 10) / 10, totalReviews: avgRating.count });
+});
+
+// --- POST announce a message to all customers of a salon ---
+router.post("/salons/:salonId/announce", async (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const { title, message } = req.body;
+  if (!title || !message) return res.status(400).json({ error: "title and message are required" });
+
+  // Get unique push tokens of all customers who have booked at this salon
+  const customers = db.prepare(
+    `SELECT DISTINCT u.pushToken FROM bookings b
+     JOIN users u ON u.id = b.userId
+     WHERE b.salonId = ? AND u.pushToken IS NOT NULL AND u.pushToken != '' AND b.userId != 'guest'`
+  ).all(req.params.salonId);
+
+  let sent = 0;
+  for (const c of customers) {
+    await sendPushNotification(c.pushToken, `${salon.name}: ${title}`, message);
+    sent++;
+  }
+
+  res.json({ sent });
 });
 
 module.exports = router;

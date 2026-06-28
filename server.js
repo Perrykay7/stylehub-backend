@@ -304,16 +304,7 @@ app.post("/users/push-token", requireAuth, (req, res) => {
   res.json({ saved: true });
 });
 
-async function sendPushNotification(pushToken, title, body) {
-  if (!pushToken || !pushToken.startsWith("ExponentPushToken")) return;
-  try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: pushToken, title, body, sound: "default" }),
-    });
-  } catch {}
-}
+const { sendPushNotification } = require("./pushHelper");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
@@ -462,6 +453,21 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
   }
 
   db.prepare("DELETE FROM bookings WHERE id = ?").run(req.params.id);
+
+  // Notify the salon owner about the cancellation
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(booking.salonId);
+  if (salon?.ownerId) {
+    const owner = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(salon.ownerId);
+    if (owner?.pushToken) {
+      const customer = db.prepare("SELECT name FROM users WHERE id = ?").get(req.userId);
+      sendPushNotification(
+        owner.pushToken,
+        "Booking Cancelled ❌",
+        `${customer?.name || "A customer"} cancelled ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
+      );
+    }
+  }
+
   res.json({ deleted: true });
 });
 

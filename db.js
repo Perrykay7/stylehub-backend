@@ -201,6 +201,11 @@ if (!columnExists("users", "pushToken")) {
   db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
 }
 
+// --- Migration: add category to services ---
+if (!columnExists("services", "category")) {
+  db.exec(`ALTER TABLE services ADD COLUMN category TEXT`);
+}
+
 // --- Migration: per-day working hours ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS salon_hours (

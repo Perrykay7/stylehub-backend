@@ -276,4 +276,26 @@ router.put("/profile", requireAuth, async (req, res) => {
   });
 });
 
+// --- DELETE /auth/account — permanently delete account and all data ---
+router.delete("/account", requireAuth, async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: "Password is required to delete your account" });
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) return res.status(401).json({ error: "Incorrect password" });
+
+  // Delete all user data
+  db.prepare("DELETE FROM bookings WHERE userId = ?").run(req.userId);
+  db.prepare("DELETE FROM reviews WHERE userId = ?").run(req.userId);
+  db.prepare("DELETE FROM professional_ratings WHERE userId = ?").run(req.userId);
+  db.prepare("DELETE FROM promo_code_recipients WHERE userId = ?").run(req.userId);
+  db.prepare("DELETE FROM password_resets WHERE phone = ?").run(user.phone);
+  db.prepare("DELETE FROM users WHERE id = ?").run(req.userId);
+
+  res.json({ deleted: true });
+});
+
 module.exports = router;
