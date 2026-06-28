@@ -560,6 +560,40 @@ app.post("/promo-codes/validate", requireAuth, (req, res) => {
     discountPercent: promoCode.discountPercent,
   });
 });
+// --- GET /cron/reminders — send push reminders for bookings 1 hour from now ---
+// Call this every 5-10 minutes from an external cron (e.g. cron-job.org)
+app.get("/cron/reminders", async (req, res) => {
+  const secret = req.headers["x-cron-secret"];
+  if (secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const now = new Date();
+  const targetMin = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+  const targetDate = targetMin.toISOString().slice(0, 10);
+  const targetTime = `${String(targetMin.getHours()).padStart(2, "0")}:${String(targetMin.getMinutes()).padStart(2, "0")}`;
+
+  const upcomingBookings = db
+    .prepare(
+      `SELECT b.*, u.pushToken, u.name as userName
+       FROM bookings b
+       JOIN users u ON u.id = b.userId
+       WHERE b.date = ? AND b.time = ? AND u.pushToken IS NOT NULL AND u.pushToken != ''`
+    )
+    .all(targetDate, targetTime);
+
+  let sent = 0;
+  for (const booking of upcomingBookings) {
+    await sendPushNotification(
+      booking.pushToken,
+      "Appointment in 1 hour! ⏰",
+      `${booking.salonName} · ${booking.serviceName} at ${booking.time}`
+    );
+    sent++;
+  }
+
+  res.json({ checked: targetDate + " " + targetTime, sent });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`StyleHub backend running on http://0.0.0.0:${PORT}`);
 });
