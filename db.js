@@ -169,6 +169,11 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Migration: add userId to reviews ---
+if (!columnExists("reviews", "userId")) {
+  db.exec(`ALTER TABLE reviews ADD COLUMN userId TEXT`);
+}
+
 // --- Migration: add createdAt to salons ---
 if (!columnExists("salons", "createdAt")) {
   db.exec(`ALTER TABLE salons ADD COLUMN createdAt TEXT`);

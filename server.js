@@ -150,6 +150,53 @@ app.get("/salons/:id", (req, res) => {
   res.json({ ...salon, rating, reviewCount, services, reviews });
 });
 
+// --- POST a review for a salon (requires auth, one per user per salon, must have booked) ---
+app.post("/salons/:id/reviews", requireAuth, (req, res) => {
+  const { id: salonId } = req.params;
+  const { rating, comment } = req.body;
+  const userId = req.userId;
+
+  if (!rating || !comment) {
+    return res.status(400).json({ error: "Rating and comment are required" });
+  }
+  if (rating < 1 || rating > 5) {
+    return res.status(400).json({ error: "Rating must be between 1 and 5" });
+  }
+
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(salonId);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const hasBooked = db.prepare(
+    "SELECT id FROM bookings WHERE salonId = ? AND userId = ? AND userId != 'guest'"
+  ).get(salonId, userId);
+  if (!hasBooked) {
+    return res.status(403).json({ error: "You can only review salons you have booked at" });
+  }
+
+  const existing = db.prepare("SELECT id FROM reviews WHERE salonId = ? AND userId = ?").get(salonId, userId);
+  if (existing) {
+    return res.status(409).json({ error: "You have already reviewed this salon" });
+  }
+
+  const user = db.prepare("SELECT name FROM users WHERE id = ?").get(userId);
+  const review = {
+    id: uuidv4(),
+    salonId,
+    userId,
+    customerName: user.name,
+    rating: Number(rating),
+    comment,
+    date: new Date().toISOString().split("T")[0],
+  };
+
+  db.prepare(
+    `INSERT INTO reviews (id, salonId, userId, customerName, rating, comment, date)
+     VALUES (@id, @salonId, @userId, @customerName, @rating, @comment, @date)`
+  ).run(review);
+
+  res.status(201).json(review);
+});
+
 // --- GET professionals at a salon who perform a specific service ---
 app.get("/salons/:id/professionals", (req, res) => {
   const { serviceId } = req.query;
