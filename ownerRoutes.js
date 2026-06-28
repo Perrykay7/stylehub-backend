@@ -503,7 +503,19 @@ router.get("/stats", (req, res) => {
      WHERE salonId IN (${placeholders}) AND createdAt >= ?`
   ).get(...salonIds, thisMonth.toISOString()).count;
 
-  res.json({ totalBookings, totalRevenue, totalCustomers, topServices, recentBookings, monthlyRevenue, monthlyBookings });
+  const recentReviews = db.prepare(
+    `SELECT r.customerName, r.rating, r.comment, r.date, s.name as salonName
+     FROM reviews r
+     JOIN salons s ON r.salonId = s.id
+     WHERE r.salonId IN (${placeholders})
+     ORDER BY r.date DESC LIMIT 10`
+  ).all(...salonIds);
+
+  const avgRating = db.prepare(
+    `SELECT COALESCE(AVG(rating), 0) as avg, COUNT(*) as count FROM reviews WHERE salonId IN (${placeholders})`
+  ).get(...salonIds);
+
+  res.json({ totalBookings, totalRevenue, totalCustomers, topServices, recentBookings, monthlyRevenue, monthlyBookings, recentReviews, avgRating: Math.round(avgRating.avg * 10) / 10, totalReviews: avgRating.count });
 });
 
 module.exports = router;
