@@ -196,6 +196,11 @@ if (!columnExists("users", "ownerCode")) {
   db.exec(`ALTER TABLE users ADD COLUMN ownerCode TEXT`);
 }
 
+// --- Migration: add push token to users ---
+if (!columnExists("users", "pushToken")) {
+  db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
+}
+
 // --- Settings table for runtime-configurable values ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (

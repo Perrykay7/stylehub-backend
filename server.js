@@ -248,6 +248,25 @@ app.get("/salons/:id/booked-slots", (req, res) => {
   res.json(allUnavailable);
 });
 
+// --- POST save push token for the logged-in user ---
+app.post("/users/push-token", requireAuth, (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: "token is required" });
+  db.prepare("UPDATE users SET pushToken = ? WHERE id = ?").run(token, req.userId);
+  res.json({ saved: true });
+});
+
+async function sendPushNotification(pushToken, title, body) {
+  if (!pushToken || !pushToken.startsWith("ExponentPushToken")) return;
+  try {
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: pushToken, title, body, sound: "default" }),
+    });
+  } catch {}
+}
+
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
   const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId } =
@@ -337,6 +356,15 @@ app.post("/bookings", requireAuth, (req, res) => {
     `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId)
      VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId)`
   ).run(booking);
+
+  const user = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(req.userId);
+  if (user?.pushToken) {
+    sendPushNotification(
+      user.pushToken,
+      "Booking Confirmed! ✂️",
+      `${salonName} · ${serviceName} on ${dateLabel} at ${time}`
+    );
+  }
 
   res.status(201).json(booking);
 });
