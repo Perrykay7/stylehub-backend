@@ -451,6 +451,40 @@ router.delete("/promo-codes/:id", (req, res) => {
   res.json({ deleted: true });
 });
 
+// --- GET working hours for a salon (all 7 days) ---
+router.get("/salons/:salonId/hours", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const hours = db.prepare("SELECT * FROM salon_hours WHERE salonId = ? ORDER BY dayOfWeek").all(req.params.salonId);
+  res.json(hours);
+});
+
+// --- PUT update working hours for a salon (upsert all 7 days) ---
+router.put("/salons/:salonId/hours", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const { hours } = req.body; // array of { dayOfWeek, openTime, closeTime, isClosed }
+  if (!Array.isArray(hours)) return res.status(400).json({ error: "hours array is required" });
+
+  const upsert = db.prepare(`
+    INSERT INTO salon_hours (id, salonId, dayOfWeek, openTime, closeTime, isClosed)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(salonId, dayOfWeek) DO UPDATE SET openTime=excluded.openTime, closeTime=excluded.closeTime, isClosed=excluded.isClosed
+  `);
+  const tx = db.transaction(() => {
+    for (const h of hours) {
+      upsert.run(uuidv4(), req.params.salonId, h.dayOfWeek, h.openTime || null, h.closeTime || null, h.isClosed ? 1 : 0);
+    }
+  });
+  tx();
+  const updated = db.prepare("SELECT * FROM salon_hours WHERE salonId = ? ORDER BY dayOfWeek").all(req.params.salonId);
+  res.json(updated);
+});
+
 // --- GET blocked slots for a salon on a specific date ---
 router.get("/salons/:salonId/blocked-slots", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);

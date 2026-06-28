@@ -201,6 +201,20 @@ if (!columnExists("users", "pushToken")) {
   db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
 }
 
+// --- Migration: per-day working hours ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS salon_hours (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    dayOfWeek INTEGER NOT NULL,
+    openTime TEXT,
+    closeTime TEXT,
+    isClosed INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    UNIQUE(salonId, dayOfWeek)
+  );
+`);
+
 // --- Settings table for runtime-configurable values ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
