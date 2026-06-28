@@ -236,11 +236,16 @@ app.get("/salons/:id/booked-slots", (req, res) => {
     return res.status(400).json({ error: "date query parameter is required" });
   }
 
-  const rows = db
+  const booked = db
     .prepare("SELECT time FROM bookings WHERE salonId = ? AND date = ?")
     .all(req.params.id, date);
 
-  res.json(rows.map((r) => r.time));
+  const blocked = db
+    .prepare("SELECT time FROM blocked_slots WHERE salonId = ? AND date = ?")
+    .all(req.params.id, date);
+
+  const allUnavailable = [...new Set([...booked.map((r) => r.time), ...blocked.map((r) => r.time)])];
+  res.json(allUnavailable);
 });
 
 // --- POST create a booking (requires auth, checks for conflicts) ---

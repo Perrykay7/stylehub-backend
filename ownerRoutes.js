@@ -451,6 +451,49 @@ router.delete("/promo-codes/:id", (req, res) => {
   res.json({ deleted: true });
 });
 
+// --- GET blocked slots for a salon on a specific date ---
+router.get("/salons/:salonId/blocked-slots", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: "date is required" });
+
+  const slots = db.prepare("SELECT * FROM blocked_slots WHERE salonId = ? AND date = ?").all(req.params.salonId, date);
+  res.json(slots);
+});
+
+// --- POST block a time slot ---
+router.post("/salons/:salonId/blocked-slots", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const { date, time } = req.body;
+  if (!date || !time) return res.status(400).json({ error: "date and time are required" });
+
+  const existing = db.prepare("SELECT id FROM blocked_slots WHERE salonId = ? AND date = ? AND time = ?").get(req.params.salonId, date, time);
+  if (existing) return res.status(409).json({ error: "Slot already blocked" });
+
+  const id = uuidv4();
+  db.prepare("INSERT INTO blocked_slots (id, salonId, date, time) VALUES (?, ?, ?, ?)").run(id, req.params.salonId, date, time);
+  res.status(201).json({ id, salonId: req.params.salonId, date, time });
+});
+
+// --- DELETE unblock a time slot ---
+router.delete("/salons/:salonId/blocked-slots", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+  const { date, time } = req.body;
+  if (!date || !time) return res.status(400).json({ error: "date and time are required" });
+
+  db.prepare("DELETE FROM blocked_slots WHERE salonId = ? AND date = ? AND time = ?").run(req.params.salonId, date, time);
+  res.json({ unblocked: true });
+});
+
 // --- GET dashboard stats for this owner ---
 router.get("/stats", (req, res) => {
   const salons = db.prepare("SELECT id FROM salons WHERE ownerId = ?").all(req.userId);

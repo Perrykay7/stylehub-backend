@@ -169,6 +169,17 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Migration: add blocked_slots table ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS blocked_slots (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+`);
+
 // --- Migration: add userId to reviews ---
 if (!columnExists("reviews", "userId")) {
   db.exec(`ALTER TABLE reviews ADD COLUMN userId TEXT`);
