@@ -385,34 +385,30 @@ router.get("/salons/:salonId/promo-codes", (req, res) => {
   res.json(withRecipients);
 });
 
-// --- POST create a promo code for one of this owner's salons ---
+// --- POST give a promo discount to specific customers of one of this owner's salons ---
+// Codes are generated internally — owners pick customers, not a code, and customers
+// never see or type a code; it's auto-applied for them (see GET /salons/:salonId/my-promo).
 router.post("/salons/:salonId/promo-codes", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
   if (!salon || salon.ownerId !== req.userId) {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const { code, discountPercent, expiresAt, userIds } = req.body;
-  if (!code || !discountPercent) {
-    return res.status(400).json({ error: "Code and discount percent are required" });
+  const { discountPercent, expiresAt, userIds } = req.body;
+  if (!discountPercent) {
+    return res.status(400).json({ error: "Discount percent is required" });
   }
   if (discountPercent <= 0 || discountPercent > 100) {
     return res.status(400).json({ error: "Discount percent must be between 1 and 100" });
   }
-
-  const normalizedCode = code.trim().toUpperCase();
-
-  const existing = db
-    .prepare("SELECT id FROM promo_codes WHERE salonId = ? AND code = ?")
-    .get(salon.id, normalizedCode);
-  if (existing) {
-    return res.status(409).json({ error: "A promo code with this name already exists for this salon" });
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    return res.status(400).json({ error: "Select at least one customer" });
   }
 
   const promoCode = {
     id: uuidv4(),
     salonId: salon.id,
-    code: normalizedCode,
+    code: `PROMO-${uuidv4().slice(0, 8).toUpperCase()}`,
     discountPercent,
     active: 1,
     createdAt: new Date().toISOString(),
@@ -424,16 +420,14 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
      VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt, @expiresAt)`
   ).run(promoCode);
 
-  if (Array.isArray(userIds) && userIds.length > 0) {
-    const insertRecipient = db.prepare(
-      `INSERT INTO promo_code_recipients (id, promoCodeId, userId) VALUES (?, ?, ?)`
-    );
-    userIds.forEach((userId) => {
-      insertRecipient.run(uuidv4(), promoCode.id, userId);
-    });
-  }
+  const insertRecipient = db.prepare(
+    `INSERT INTO promo_code_recipients (id, promoCodeId, userId) VALUES (?, ?, ?)`
+  );
+  userIds.forEach((userId) => {
+    insertRecipient.run(uuidv4(), promoCode.id, userId);
+  });
 
-  res.status(201).json(promoCode);
+  res.status(201).json({ ...promoCode, recipients: userIds });
 });
 
 // --- DELETE a promo code (only if it belongs to one of this owner's salons) ---

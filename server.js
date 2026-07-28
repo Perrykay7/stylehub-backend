@@ -566,6 +566,30 @@ app.post("/promo-codes/validate", requireAuth, (req, res) => {
     discountPercent: promoCode.discountPercent,
   });
 });
+
+// --- GET the logged-in customer's active promo for a salon, if any ---
+// Owners target promos to specific customers (no code to type); this lets the
+// app silently detect and apply it for that customer.
+app.get("/salons/:salonId/my-promo", requireAuth, (req, res) => {
+  const promos = db
+    .prepare(
+      `SELECT pc.code, pc.discountPercent, pc.expiresAt
+       FROM promo_codes pc
+       INNER JOIN promo_code_recipients r ON r.promoCodeId = pc.id
+       WHERE pc.salonId = ? AND r.userId = ? AND pc.active = 1
+       ORDER BY pc.discountPercent DESC`
+    )
+    .all(req.params.salonId, req.userId);
+
+  const promo = promos.find((p) => !p.expiresAt || new Date(p.expiresAt) > new Date());
+
+  if (!promo) {
+    return res.status(404).json({ error: "No active promo" });
+  }
+
+  res.json(promo);
+});
+
 // --- GET /cron/reminders — send push reminders for bookings 1 hour from now ---
 // Call this every 5-10 minutes from an external cron (e.g. cron-job.org)
 app.get("/cron/reminders", async (req, res) => {
