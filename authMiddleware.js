@@ -31,4 +31,12 @@ function requireOwner(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireOwner };
+function requireProfessional(req, res, next) {
+  const user = db.prepare("SELECT role FROM users WHERE id = ?").get(req.userId);
+  if (!user || user.role !== "professional") {
+    return res.status(403).json({ error: "Only professionals can perform this action" });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireOwner, requireProfessional };

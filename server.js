@@ -8,6 +8,7 @@ const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const authRoutes = require("./auth");
 const ownerRoutes = require("./ownerRoutes");
+const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 
 const app = express();
@@ -95,6 +96,7 @@ app.use("/auth", authRoutes);
 
 // --- Owner routes (owner-only) ---
 app.use("/owner", ownerRoutes);
+app.use("/professional", professionalRoutes);
 
 // --- GET all salons (with services and reviews nested, rating computed live) ---
 app.get("/salons", (req, res) => {

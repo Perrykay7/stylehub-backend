@@ -323,11 +323,13 @@ router.post("/salons/:salonId/professionals", (req, res) => {
     name,
     photoUrl: photoUrl || null,
     createdAt: new Date().toISOString(),
+    userId: null,
+    claimCode: `CLAIM-${uuidv4().slice(0, 8).toUpperCase()}`,
   };
 
   db.prepare(
-    `INSERT INTO professionals (id, salonId, name, photoUrl, createdAt)
-     VALUES (@id, @salonId, @name, @photoUrl, @createdAt)`
+    `INSERT INTO professionals (id, salonId, name, photoUrl, createdAt, userId, claimCode)
+     VALUES (@id, @salonId, @name, @photoUrl, @createdAt, @userId, @claimCode)`
   ).run(professional);
 
   if (Array.isArray(serviceIds) && serviceIds.length > 0) {

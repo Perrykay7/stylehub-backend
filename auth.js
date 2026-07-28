@@ -14,15 +14,23 @@ function getCurrentInviteCode() {
   return row ? row.value : "";
 }
 
+function getCurrentProfessionalInviteCode() {
+  const row = db
+    .prepare("SELECT value FROM settings WHERE key = 'professional_invite_code'")
+    .get();
+  return row ? row.value : "";
+}
+
 // --- POST /auth/register ---
 router.post("/register", async (req, res) => {
-  const { name, phone, password, role, inviteCode } = req.body;
+  const { name, phone, password, role, inviteCode, claimCode } = req.body;
 
   if (!name || !phone || !password) {
     return res.status(400).json({ error: "Name, phone, and password are required" });
   }
 
   const wantsOwner = role === "owner";
+  const wantsProfessional = role === "professional";
 
   if (wantsOwner) {
     const currentCode = getCurrentInviteCode();
@@ -34,7 +42,32 @@ router.post("/register", async (req, res) => {
     }
   }
 
-  const finalRole = wantsOwner ? "owner" : "customer";
+  let claimedProfessional = null;
+  if (wantsProfessional) {
+    const currentProfessionalCode = getCurrentProfessionalInviteCode();
+    if (!currentProfessionalCode) {
+      return res.status(403).json({ error: "Professional sign-up is not available right now" });
+    }
+    if (!inviteCode || inviteCode !== currentProfessionalCode) {
+      return res.status(403).json({ error: "Invalid professional referral code" });
+    }
+    if (!claimCode || !claimCode.trim()) {
+      return res
+        .status(400)
+        .json({ error: "A claim code from your salon owner is required" });
+    }
+    claimedProfessional = db
+      .prepare("SELECT * FROM professionals WHERE claimCode = ?")
+      .get(claimCode.trim().toUpperCase());
+    if (!claimedProfessional) {
+      return res.status(404).json({ error: "Invalid claim code" });
+    }
+    if (claimedProfessional.userId) {
+      return res.status(409).json({ error: "This claim code has already been used" });
+    }
+  }
+
+  const finalRole = wantsOwner ? "owner" : wantsProfessional ? "professional" : "customer";
 
   const existing = db.prepare("SELECT id FROM users WHERE phone = ?").get(phone);
   if (existing) {
@@ -55,6 +88,13 @@ router.post("/register", async (req, res) => {
   db.prepare(
     `INSERT INTO users (id, name, phone, passwordHash, role, ownerCode, createdAt) VALUES (@id, @name, @phone, @passwordHash, @role, @ownerCode, @createdAt)`
   ).run(user);
+
+  if (claimedProfessional) {
+    db.prepare("UPDATE professionals SET userId = ?, claimCode = NULL WHERE id = ?").run(
+      user.id,
+      claimedProfessional.id
+    );
+  }
 
   const token = jwt.sign(
     { userId: user.id, name: user.name, role: user.role },
@@ -205,6 +245,26 @@ router.put("/admin/invite-code", (req, res) => {
   ).run(code);
 
   res.json({ message: "Invite code updated", ownersDowngraded: downgraded.changes });
+});
+
+// --- PUT /auth/admin/professional-invite-code — update the professional sign-up referral code ---
+router.put("/admin/professional-invite-code", (req, res) => {
+  const { newCode } = req.body;
+  const secret = req.headers["x-admin-secret"];
+
+  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) {
+    return res.status(403).json({ error: "Unauthorized" });
+  }
+  if (!newCode || typeof newCode !== "string" || !newCode.trim()) {
+    return res.status(400).json({ error: "newCode is required" });
+  }
+
+  const code = newCode.trim();
+  db.prepare(
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('professional_invite_code', ?)"
+  ).run(code);
+
+  res.json({ message: "Professional invite code updated" });
 });
 
 // --- POST /auth/reverify-owner — lets an existing account re-verify with the new code ---

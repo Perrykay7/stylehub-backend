@@ -201,6 +201,24 @@ if (!columnExists("users", "pushToken")) {
   db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
 }
 
+// --- Migration: let professionals sign in and claim their roster entry ---
+if (!columnExists("professionals", "userId")) {
+  db.exec(`ALTER TABLE professionals ADD COLUMN userId TEXT`);
+}
+if (!columnExists("professionals", "claimCode")) {
+  db.exec(`ALTER TABLE professionals ADD COLUMN claimCode TEXT`);
+}
+// Backfill a claim code for any existing professionals added before this migration
+const professionalsMissingClaimCode = db
+  .prepare("SELECT id FROM professionals WHERE claimCode IS NULL AND userId IS NULL")
+  .all();
+if (professionalsMissingClaimCode.length > 0) {
+  const setClaimCode = db.prepare("UPDATE professionals SET claimCode = ? WHERE id = ?");
+  professionalsMissingClaimCode.forEach((p) => {
+    setClaimCode.run(uuidv4().slice(0, 8).toUpperCase(), p.id);
+  });
+}
+
 // --- Migration: add category to services ---
 if (!columnExists("services", "category")) {
   db.exec(`ALTER TABLE services ADD COLUMN category TEXT`);
@@ -233,6 +251,16 @@ const existingCode = db.prepare("SELECT value FROM settings WHERE key = 'owner_i
 if (!existingCode) {
   const initialCode = process.env.OWNER_INVITE_CODE || "";
   db.prepare("INSERT INTO settings (key, value) VALUES ('owner_invite_code', ?)").run(initialCode);
+}
+
+const existingProfessionalCode = db
+  .prepare("SELECT value FROM settings WHERE key = 'professional_invite_code'")
+  .get();
+if (!existingProfessionalCode) {
+  const initialProfessionalCode = process.env.PROFESSIONAL_INVITE_CODE || "";
+  db.prepare("INSERT INTO settings (key, value) VALUES ('professional_invite_code', ?)").run(
+    initialProfessionalCode
+  );
 }
 
 // --- Ensure a placeholder "guest" user exists for manual/walk-in bookings ---
