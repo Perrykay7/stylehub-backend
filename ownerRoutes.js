@@ -430,6 +430,35 @@ router.post("/salons/:salonId/promo-codes", (req, res) => {
   res.status(201).json({ ...promoCode, recipients: userIds });
 });
 
+// --- PUT update a promo code's discount/expiry (only if it belongs to one of this owner's salons) ---
+router.put("/promo-codes/:id", (req, res) => {
+  const promoCode = db.prepare("SELECT * FROM promo_codes WHERE id = ?").get(req.params.id);
+  if (!promoCode) {
+    return res.status(404).json({ error: "Promo code not found" });
+  }
+
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(promoCode.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(403).json({ error: "Not authorized to edit this promo code" });
+  }
+
+  const { discountPercent, expiresAt } = req.body;
+  if (!discountPercent) {
+    return res.status(400).json({ error: "Discount percent is required" });
+  }
+  if (discountPercent <= 0 || discountPercent > 100) {
+    return res.status(400).json({ error: "Discount percent must be between 1 and 100" });
+  }
+
+  db.prepare("UPDATE promo_codes SET discountPercent = ?, expiresAt = ? WHERE id = ?").run(
+    discountPercent,
+    expiresAt || null,
+    req.params.id
+  );
+
+  res.json(db.prepare("SELECT * FROM promo_codes WHERE id = ?").get(req.params.id));
+});
+
 // --- DELETE a promo code (only if it belongs to one of this owner's salons) ---
 router.delete("/promo-codes/:id", (req, res) => {
   const promoCode = db.prepare("SELECT * FROM promo_codes WHERE id = ?").get(req.params.id);
