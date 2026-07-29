@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { requireAuth } = require("./authMiddleware");
+const { sendPushNotification } = require("./pushHelper");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
@@ -82,11 +83,13 @@ router.post("/register", async (req, res) => {
     passwordHash,
     role: finalRole,
     ownerCode: wantsOwner ? getCurrentInviteCode() : null,
+    professionalCode: wantsProfessional ? getCurrentProfessionalInviteCode() : null,
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
-    `INSERT INTO users (id, name, phone, passwordHash, role, ownerCode, createdAt) VALUES (@id, @name, @phone, @passwordHash, @role, @ownerCode, @createdAt)`
+    `INSERT INTO users (id, name, phone, passwordHash, role, ownerCode, professionalCode, createdAt)
+     VALUES (@id, @name, @phone, @passwordHash, @role, @ownerCode, @professionalCode, @createdAt)`
   ).run(user);
 
   if (claimedProfessional) {
@@ -239,10 +242,27 @@ router.put("/admin/invite-code", (req, res) => {
   const code = newCode.trim();
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('owner_invite_code', ?)").run(code);
 
-  // Downgrade owners who verified with the old code
+  // Find, then downgrade, owners who verified with the old code
+  const affectedOwners = db
+    .prepare(
+      "SELECT id, pushToken FROM users WHERE role = 'owner' AND (ownerCode IS NULL OR ownerCode != ?)"
+    )
+    .all(code);
+
   const downgraded = db.prepare(
     "UPDATE users SET role = 'customer' WHERE role = 'owner' AND (ownerCode IS NULL OR ownerCode != ?)"
   ).run(code);
+
+  affectedOwners.forEach((owner) => {
+    if (owner.pushToken) {
+      sendPushNotification(
+        owner.pushToken,
+        "Re-verification required",
+        "The salon owner referral code has changed. Tap to enter the new code and keep your access.",
+        { type: "reverify", role: "owner" }
+      );
+    }
+  });
 
   res.json({ message: "Invite code updated", ownersDowngraded: downgraded.changes });
 });
@@ -264,7 +284,84 @@ router.put("/admin/professional-invite-code", (req, res) => {
     "INSERT OR REPLACE INTO settings (key, value) VALUES ('professional_invite_code', ?)"
   ).run(code);
 
-  res.json({ message: "Professional invite code updated" });
+  // Find, then downgrade, professionals who verified with the old code.
+  // Their professionals.userId link is left intact so re-verifying restores access
+  // without having to claim their roster entry again.
+  const affectedProfessionals = db
+    .prepare(
+      "SELECT id, pushToken FROM users WHERE role = 'professional' AND (professionalCode IS NULL OR professionalCode != ?)"
+    )
+    .all(code);
+
+  const downgraded = db.prepare(
+    "UPDATE users SET role = 'customer' WHERE role = 'professional' AND (professionalCode IS NULL OR professionalCode != ?)"
+  ).run(code);
+
+  affectedProfessionals.forEach((professional) => {
+    if (professional.pushToken) {
+      sendPushNotification(
+        professional.pushToken,
+        "Re-verification required",
+        "The professional referral code has changed. Tap to enter the new code and keep your access.",
+        { type: "reverify", role: "professional" }
+      );
+    }
+  });
+
+  res.json({ message: "Professional invite code updated", professionalsDowngraded: downgraded.changes });
+});
+
+// --- POST /auth/reverify — re-enter the current code to restore owner/professional access ---
+router.post("/reverify", requireAuth, (req, res) => {
+  const { role, inviteCode } = req.body;
+
+  if (role !== "owner" && role !== "professional") {
+    return res.status(400).json({ error: "role must be 'owner' or 'professional'" });
+  }
+
+  if (role === "owner") {
+    const currentCode = getCurrentInviteCode();
+    if (!currentCode) {
+      return res.status(403).json({ error: "Owner sign-up is not available right now" });
+    }
+    if (!inviteCode || inviteCode !== currentCode) {
+      return res.status(403).json({ error: "Invalid owner invite code" });
+    }
+    db.prepare("UPDATE users SET role = 'owner', ownerCode = ? WHERE id = ?").run(
+      currentCode,
+      req.userId
+    );
+  } else {
+    const currentCode = getCurrentProfessionalInviteCode();
+    if (!currentCode) {
+      return res.status(403).json({ error: "Professional sign-up is not available right now" });
+    }
+    if (!inviteCode || inviteCode !== currentCode) {
+      return res.status(403).json({ error: "Invalid professional referral code" });
+    }
+    const professionalRow = db
+      .prepare("SELECT id FROM professionals WHERE userId = ?")
+      .get(req.userId);
+    if (!professionalRow) {
+      return res.status(404).json({ error: "No professional profile linked to this account" });
+    }
+    db.prepare("UPDATE users SET role = 'professional', professionalCode = ? WHERE id = ?").run(
+      currentCode,
+      req.userId
+    );
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.userId);
+  const token = jwt.sign(
+    { userId: user.id, name: user.name, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "30d" }
+  );
+
+  res.json({
+    token,
+    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+  });
 });
 
 // --- PUT /auth/profile — update name and/or phone ---

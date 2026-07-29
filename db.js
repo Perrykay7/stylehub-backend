@@ -196,6 +196,11 @@ if (!columnExists("users", "ownerCode")) {
   db.exec(`ALTER TABLE users ADD COLUMN ownerCode TEXT`);
 }
 
+// --- Migration: track which professional referral code a user last verified with ---
+if (!columnExists("users", "professionalCode")) {
+  db.exec(`ALTER TABLE users ADD COLUMN professionalCode TEXT`);
+}
+
 // --- Migration: add push token to users ---
 if (!columnExists("users", "pushToken")) {
   db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
