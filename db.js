@@ -169,6 +169,12 @@ if (!columnExists("bookings", "professionalId")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN professionalId TEXT`);
 }
 
+// --- Migration: track whether the customer picked "No Preference" ---
+// so the display can say so even though a real professional got auto-assigned.
+if (!columnExists("bookings", "noPreference")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN noPreference INTEGER NOT NULL DEFAULT 0`);
+}
+
 // --- Migration: add blocked_slots table ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS blocked_slots (

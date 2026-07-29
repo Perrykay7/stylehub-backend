@@ -1,6 +1,8 @@
 const express = require("express");
 const db = require("./db");
 const { requireAuth, requireProfessional } = require("./authMiddleware");
+const { sendPushNotification } = require("./pushHelper");
+const { autoAssignStaleBookings } = require("./bookingAssignment");
 
 const router = express.Router();
 
@@ -32,6 +34,7 @@ router.get("/profile", (req, res) => {
 
 // --- GET bookings assigned to this professional (includes "No Preference" auto-assigns) ---
 router.get("/bookings", (req, res) => {
+  autoAssignStaleBookings();
   const professional = getMyProfessional(req);
   if (!professional) {
     return res.status(404).json({ error: "Professional profile not found" });
@@ -54,6 +57,87 @@ router.get("/bookings", (req, res) => {
   }));
 
   res.json(withDisplayInfo);
+});
+
+// --- GET open "No Preference" bookings this professional qualifies for and is free at ---
+router.get("/available-bookings", (req, res) => {
+  autoAssignStaleBookings();
+  const professional = getMyProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional profile not found" });
+  }
+
+  const serviceIds = db
+    .prepare("SELECT serviceId FROM professional_services WHERE professionalId = ?")
+    .all(professional.id)
+    .map((r) => r.serviceId);
+
+  if (serviceIds.length === 0) return res.json([]);
+
+  const placeholders = serviceIds.map(() => "?").join(",");
+  const openBookings = db
+    .prepare(
+      `SELECT id, salonId, salonName, serviceId, serviceName, date, dateLabel, time, price
+       FROM bookings
+       WHERE salonId = ? AND professionalId IS NULL AND noPreference = 1 AND serviceId IN (${placeholders})
+       ORDER BY date ASC, time ASC`
+    )
+    .all(professional.salonId, ...serviceIds);
+
+  const available = openBookings.filter((b) => {
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+      .get(professional.id, b.date, b.time);
+    return !conflict;
+  });
+
+  res.json(available);
+});
+
+// --- POST accept/claim an open "No Preference" booking ---
+router.post("/available-bookings/:id/accept", (req, res) => {
+  const professional = getMyProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional profile not found" });
+  }
+
+  const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(req.params.id);
+  if (!booking || booking.salonId !== professional.salonId || !booking.noPreference || booking.professionalId) {
+    return res.status(404).json({ error: "This booking is no longer available" });
+  }
+
+  const qualified = db
+    .prepare("SELECT id FROM professional_services WHERE professionalId = ? AND serviceId = ?")
+    .get(professional.id, booking.serviceId);
+  if (!qualified) {
+    return res.status(400).json({ error: "You don't offer this service" });
+  }
+
+  const conflict = db
+    .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+    .get(professional.id, booking.date, booking.time);
+  if (conflict) {
+    return res.status(409).json({ error: "You already have a booking at this time" });
+  }
+
+  const result = db
+    .prepare("UPDATE bookings SET professionalId = ? WHERE id = ? AND professionalId IS NULL")
+    .run(professional.id, booking.id);
+
+  if (result.changes === 0) {
+    return res.status(409).json({ error: "This booking was just claimed by another professional" });
+  }
+
+  const customer = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(booking.userId);
+  if (customer?.pushToken) {
+    sendPushNotification(
+      customer.pushToken,
+      "Professional Assigned ✂️",
+      `${professional.name} will handle your ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
+    );
+  }
+
+  res.json({ ...booking, professionalId: professional.id });
 });
 
 // --- GET this professional's ratings/comments — anonymized, no customer identity ---

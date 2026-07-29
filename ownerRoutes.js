@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
 const { sendPushNotification } = require("./pushHelper");
+const { autoAssignStaleBookings } = require("./bookingAssignment");
 
 const router = express.Router();
 
@@ -238,6 +239,7 @@ router.post("/salons/:salonId/manual-booking", (req, res) => {
 
 // --- GET bookings for all of this owner's salons ---
 router.get("/bookings", (req, res) => {
+  autoAssignStaleBookings();
   const bookings = db
     .prepare(
       `SELECT b.*, u.name AS userName, u.phone AS userPhone, p.name AS professionalName,

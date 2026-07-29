@@ -307,6 +307,7 @@ app.post("/users/push-token", requireAuth, (req, res) => {
 });
 
 const { sendPushNotification } = require("./pushHelper");
+const { autoAssignStaleBookings, findFreeQualifiedProfessionals } = require("./bookingAssignment");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
@@ -327,6 +328,8 @@ app.post("/bookings", requireAuth, (req, res) => {
     .all(salonId, serviceId);
 
   let finalProfessionalId = professionalId || null;
+  let noPreference = false;
+  let professionalsToNotify = [];
 
   if (qualifiedProfessionals.length === 0) {
     // No professionals configured — one booking per slot
@@ -345,36 +348,17 @@ app.post("/bookings", requireAuth, (req, res) => {
       return res.status(409).json({ error: "That professional is no longer available at this time. Please choose another." });
     }
   } else {
-    // "No Preference" — check if all professionals for this service are fully booked at this time
-    const proIds = qualifiedProfessionals.map((p) => p.id);
-    const placeholders = proIds.map(() => "?").join(",");
-    const bookedCount = db
-      .prepare(
-        `SELECT COUNT(DISTINCT professionalId) as count FROM bookings
-         WHERE salonId = ? AND date = ? AND time = ? AND professionalId IN (${placeholders})`
-      )
-      .get(salonId, date, time, ...proIds);
+    // "No Preference" — leave unassigned so any qualified, free professional can
+    // claim it. Only fall back to auto-assignment if nobody claims it in time
+    // (see autoAssignStaleBookings, called lazily whenever bookings are read).
+    const available = findFreeQualifiedProfessionals(salonId, serviceId, date, time);
 
-    if (bookedCount.count >= proIds.length) {
+    if (available.length === 0) {
       return res.status(409).json({ error: "This time slot is fully booked. Please pick another." });
     }
 
-    // Auto-assign the professional with fewest bookings today who is free at this time
-    const available = qualifiedProfessionals.filter((p) => {
-      const alreadyBooked = db
-        .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
-        .get(p.id, date, time);
-      return !alreadyBooked;
-    });
-
-    const counts = available.map((p) => {
-      const count = db
-        .prepare("SELECT COUNT(*) as count FROM bookings WHERE professionalId = ? AND date = ?")
-        .get(p.id, date);
-      return { id: p.id, count: count.count };
-    });
-    counts.sort((a, b) => a.count - b.count);
-    finalProfessionalId = counts[0]?.id || null;
+    noPreference = true;
+    professionalsToNotify = available.map((p) => p.id);
   }
 
   let finalPrice = price;
@@ -419,11 +403,12 @@ app.post("/bookings", requireAuth, (req, res) => {
     discountAmount,
     createdAt: new Date().toISOString(),
     professionalId: finalProfessionalId,
+    noPreference: noPreference ? 1 : 0,
   };
 
   db.prepare(
-    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId)
-     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId)`
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, noPreference)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference)`
   ).run(booking);
 
   const user = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(req.userId);
@@ -433,6 +418,24 @@ app.post("/bookings", requireAuth, (req, res) => {
       "Booking Confirmed! ✂️",
       `${salonName} · ${serviceName} on ${dateLabel} at ${time}`
     );
+  }
+
+  if (noPreference && professionalsToNotify.length > 0) {
+    const placeholders = professionalsToNotify.map(() => "?").join(",");
+    const proUsers = db
+      .prepare(
+        `SELECT u.pushToken FROM professionals p
+         INNER JOIN users u ON u.id = p.userId
+         WHERE p.id IN (${placeholders}) AND u.pushToken IS NOT NULL`
+      )
+      .all(...professionalsToNotify);
+    proUsers.forEach((u) => {
+      sendPushNotification(
+        u.pushToken,
+        "New booking available 💈",
+        `${serviceName} on ${dateLabel} at ${time} — tap to accept it`
+      );
+    });
   }
 
   res.status(201).json(booking);
@@ -475,6 +478,7 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
 
 // --- GET bookings for the logged-in user only ---
 app.get("/bookings", requireAuth, (req, res) => {
+  autoAssignStaleBookings();
   const bookings = db
     .prepare(
       `SELECT b.*, p.name AS professionalName,
