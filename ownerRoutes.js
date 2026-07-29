@@ -81,6 +81,7 @@ router.delete("/salons/:id", (req, res) => {
   });
   db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salon.id);
+  db.prepare("DELETE FROM favorites WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM services WHERE salonId = ?").run(salon.id);
   db.prepare("DELETE FROM salons WHERE id = ?").run(salon.id);
   res.json({ deleted: true });

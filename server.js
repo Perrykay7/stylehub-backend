@@ -488,6 +488,35 @@ app.get("/bookings", requireAuth, (req, res) => {
   res.json(bookings);
 });
 
+// --- GET the logged-in customer's favorited salon ids ---
+app.get("/favorites", requireAuth, (req, res) => {
+  const rows = db
+    .prepare("SELECT salonId FROM favorites WHERE userId = ? ORDER BY createdAt DESC")
+    .all(req.userId);
+  res.json(rows.map((r) => r.salonId));
+});
+
+// --- POST favorite a salon ---
+app.post("/favorites/:salonId", requireAuth, (req, res) => {
+  const salon = db.prepare("SELECT id FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  db.prepare(
+    "INSERT OR IGNORE INTO favorites (id, userId, salonId, createdAt) VALUES (?, ?, ?, ?)"
+  ).run(uuidv4(), req.userId, req.params.salonId, new Date().toISOString());
+
+  res.status(201).json({ favorited: true });
+});
+
+// --- DELETE unfavorite a salon ---
+app.delete("/favorites/:salonId", requireAuth, (req, res) => {
+  db.prepare("DELETE FROM favorites WHERE userId = ? AND salonId = ?").run(
+    req.userId,
+    req.params.salonId
+  );
+  res.json({ favorited: false });
+});
+
 // --- POST submit a rating for a professional after a completed booking ---
 app.post("/professionals/:id/ratings", requireAuth, (req, res) => {
   const { bookingId, rating, comment } = req.body;

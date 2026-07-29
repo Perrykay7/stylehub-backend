@@ -422,6 +422,7 @@ router.delete("/account", requireAuth, async (req, res) => {
   db.prepare("DELETE FROM reviews WHERE userId = ?").run(req.userId);
   db.prepare("DELETE FROM professional_ratings WHERE userId = ?").run(req.userId);
   db.prepare("DELETE FROM promo_code_recipients WHERE userId = ?").run(req.userId);
+  db.prepare("DELETE FROM favorites WHERE userId = ?").run(req.userId);
   db.prepare("DELETE FROM password_resets WHERE phone = ?").run(user.phone);
   db.prepare("DELETE FROM users WHERE id = ?").run(req.userId);
 

@@ -229,6 +229,19 @@ if (!columnExists("services", "category")) {
   db.exec(`ALTER TABLE services ADD COLUMN category TEXT`);
 }
 
+// --- Migration: add favorites ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS favorites (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    salonId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    UNIQUE(userId, salonId),
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+`);
+
 // --- Migration: per-day working hours ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS salon_hours (
