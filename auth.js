@@ -267,33 +267,6 @@ router.put("/admin/professional-invite-code", (req, res) => {
   res.json({ message: "Professional invite code updated" });
 });
 
-// --- POST /auth/reverify-owner — lets an existing account re-verify with the new code ---
-router.post("/reverify-owner", requireAuth, (req, res) => {
-  const { inviteCode } = req.body;
-  const currentCode = getCurrentInviteCode();
-
-  if (!currentCode) {
-    return res.status(403).json({ error: "Owner sign-up is not available right now" });
-  }
-  if (!inviteCode || inviteCode !== currentCode) {
-    return res.status(403).json({ error: "Invalid owner invite code" });
-  }
-
-  db.prepare("UPDATE users SET role = 'owner', ownerCode = ? WHERE id = ?").run(currentCode, req.userId);
-
-  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.userId);
-  const token = jwt.sign(
-    { userId: user.id, name: user.name, role: user.role },
-    JWT_SECRET,
-    { expiresIn: "30d" }
-  );
-
-  res.json({
-    token,
-    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
-  });
-});
-
 // --- PUT /auth/profile — update name and/or phone ---
 router.put("/profile", requireAuth, async (req, res) => {
   const { name, phone, currentPassword, newPassword } = req.body;
