@@ -426,4 +426,80 @@ if (salonCount.count === 0) {
   console.log("Seeding complete.");
 }
 
+// --- One-time cleanup: remove the original placeholder demo salons (ids 1, 2, 3)
+// and everything tied to them, now that real salons have been added. ---
+const seedSalonsRemoved = db
+  .prepare("SELECT value FROM settings WHERE key = 'seed_salons_removed'")
+  .get();
+
+if (!seedSalonsRemoved) {
+  const removeSalon = db.transaction((salonId) => {
+    const professionalIds = db
+      .prepare("SELECT id FROM professionals WHERE salonId = ?")
+      .all(salonId)
+      .map((r) => r.id);
+    const serviceIds = db
+      .prepare("SELECT id FROM services WHERE salonId = ?")
+      .all(salonId)
+      .map((r) => r.id);
+
+    if (professionalIds.length > 0) {
+      const placeholders = professionalIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM professional_ratings WHERE professionalId IN (${placeholders})`).run(
+        ...professionalIds
+      );
+      db.prepare(`DELETE FROM professional_services WHERE professionalId IN (${placeholders})`).run(
+        ...professionalIds
+      );
+    }
+    if (serviceIds.length > 0) {
+      // Also clear by serviceId directly, in case a professional from another
+      // salon was ever assigned to one of this salon's services.
+      const placeholders = serviceIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM professional_services WHERE serviceId IN (${placeholders})`).run(
+        ...serviceIds
+      );
+    }
+    if (professionalIds.length > 0) {
+      const placeholders = professionalIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM professionals WHERE id IN (${placeholders})`).run(...professionalIds);
+    }
+
+    const promoIds = db
+      .prepare("SELECT id FROM promo_codes WHERE salonId = ?")
+      .all(salonId)
+      .map((r) => r.id);
+    if (promoIds.length > 0) {
+      const placeholders = promoIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM promo_code_recipients WHERE promoCodeId IN (${placeholders})`).run(
+        ...promoIds
+      );
+      db.prepare(`DELETE FROM promo_codes WHERE id IN (${placeholders})`).run(...promoIds);
+    }
+
+    // Also clear bookings by serviceId directly, in case any booking's
+    // salonId ever drifted out of sync with its serviceId's actual salon.
+    if (serviceIds.length > 0) {
+      const placeholders = serviceIds.map(() => "?").join(",");
+      db.prepare(`DELETE FROM bookings WHERE serviceId IN (${placeholders})`).run(...serviceIds);
+    }
+    db.prepare("DELETE FROM bookings WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM reviews WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM favorites WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM blocked_slots WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM salon_hours WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM services WHERE salonId = ?").run(salonId);
+    db.prepare("DELETE FROM salons WHERE id = ?").run(salonId);
+  });
+
+  ["1", "2", "3"].forEach((salonId) => {
+    const exists = db.prepare("SELECT id FROM salons WHERE id = ?").get(salonId);
+    if (exists) removeSalon(salonId);
+  });
+
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('seed_salons_removed', '1')"
+  ).run();
+}
+
 module.exports = db;
