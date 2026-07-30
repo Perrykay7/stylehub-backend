@@ -2,7 +2,7 @@ const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
-const { sendPushNotification } = require("./pushHelper");
+const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 
@@ -691,20 +691,18 @@ router.post("/salons/:salonId/announce", async (req, res) => {
   const { title, message } = req.body;
   if (!title || !message) return res.status(400).json({ error: "title and message are required" });
 
-  // Get unique push tokens of all customers who have booked at this salon
+  // Get every distinct customer who has booked at this salon
   const customers = db.prepare(
-    `SELECT DISTINCT u.pushToken FROM bookings b
+    `SELECT DISTINCT u.id AS userId FROM bookings b
      JOIN users u ON u.id = b.userId
-     WHERE b.salonId = ? AND u.pushToken IS NOT NULL AND u.pushToken != '' AND b.userId != 'guest'`
+     WHERE b.salonId = ? AND b.userId != 'guest'`
   ).all(req.params.salonId);
 
-  let sent = 0;
-  for (const c of customers) {
-    await sendPushNotification(c.pushToken, `${salon.name}: ${title}`, message);
-    sent++;
-  }
+  customers.forEach((c) => {
+    notify(c.userId, `${salon.name}: ${title}`, message, "announcement", { salonId: salon.id });
+  });
 
-  res.json({ sent });
+  res.json({ sent: customers.length });
 });
 
 module.exports = router;

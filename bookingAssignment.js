@@ -1,5 +1,5 @@
 const db = require("./db");
-const { sendPushNotification } = require("./pushHelper");
+const { notify } = require("./notify");
 
 // If nobody claims a "No Preference" booking before it's this close to
 // starting, auto-assign the least-busy free professional so the customer
@@ -74,24 +74,22 @@ function autoAssignStaleBookings() {
     const professional = assignBooking(booking);
     if (!professional) return;
 
-    const customer = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(booking.userId);
-    if (customer?.pushToken) {
-      sendPushNotification(
-        customer.pushToken,
-        "Professional Assigned ✂️",
-        `${professional.name} will handle your ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
-      );
-    }
+    notify(
+      booking.userId,
+      "Professional Assigned ✂️",
+      `${professional.name} will handle your ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`,
+      "professional_assigned",
+      { bookingId: booking.id }
+    );
 
     if (professional.userId) {
-      const proUser = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(professional.userId);
-      if (proUser?.pushToken) {
-        sendPushNotification(
-          proUser.pushToken,
-          "Booking Assigned to You 💈",
-          `${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
-        );
-      }
+      notify(
+        professional.userId,
+        "Booking Assigned to You 💈",
+        `${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`,
+        "new_assignment",
+        { bookingId: booking.id }
+      );
     }
   });
 }

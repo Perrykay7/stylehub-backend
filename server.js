@@ -342,8 +342,9 @@ app.post("/users/push-token", requireAuth, (req, res) => {
   res.json({ saved: true });
 });
 
-const { sendPushNotification } = require("./pushHelper");
+const { notify } = require("./notify");
 const { autoAssignStaleBookings, findFreeQualifiedProfessionals } = require("./bookingAssignment");
+const { generateCancellationReminders } = require("./reminders");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
@@ -447,29 +448,30 @@ app.post("/bookings", requireAuth, (req, res) => {
      VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference)`
   ).run(booking);
 
-  const user = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(req.userId);
-  if (user?.pushToken) {
-    sendPushNotification(
-      user.pushToken,
-      "Booking Confirmed! ✂️",
-      `${salonName} · ${serviceName} on ${dateLabel} at ${time}`
-    );
-  }
+  notify(
+    req.userId,
+    "Booking Confirmed! ✂️",
+    `${salonName} · ${serviceName} on ${dateLabel} at ${time}`,
+    "booking_confirmed",
+    { bookingId: booking.id }
+  );
 
   if (noPreference && professionalsToNotify.length > 0) {
     const placeholders = professionalsToNotify.map(() => "?").join(",");
     const proUsers = db
       .prepare(
-        `SELECT u.pushToken FROM professionals p
+        `SELECT u.id AS userId FROM professionals p
          INNER JOIN users u ON u.id = p.userId
-         WHERE p.id IN (${placeholders}) AND u.pushToken IS NOT NULL`
+         WHERE p.id IN (${placeholders})`
       )
       .all(...professionalsToNotify);
     proUsers.forEach((u) => {
-      sendPushNotification(
-        u.pushToken,
+      notify(
+        u.userId,
         "New booking available 💈",
-        `${serviceName} on ${dateLabel} at ${time} — tap to accept it`
+        `${serviceName} on ${dateLabel} at ${time} — tap to accept it`,
+        "new_open_job",
+        { bookingId: booking.id }
       );
     });
   }
@@ -498,15 +500,14 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
   // Notify the salon owner about the cancellation
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(booking.salonId);
   if (salon?.ownerId) {
-    const owner = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(salon.ownerId);
-    if (owner?.pushToken) {
-      const customer = db.prepare("SELECT name FROM users WHERE id = ?").get(req.userId);
-      sendPushNotification(
-        owner.pushToken,
-        "Booking Cancelled ❌",
-        `${customer?.name || "A customer"} cancelled ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
-      );
-    }
+    const customer = db.prepare("SELECT name FROM users WHERE id = ?").get(req.userId);
+    notify(
+      salon.ownerId,
+      "Booking Cancelled ❌",
+      `${customer?.name || "A customer"} cancelled ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`,
+      "booking_cancelled",
+      { bookingId: booking.id }
+    );
   }
 
   res.json({ deleted: true });
@@ -515,6 +516,7 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
 // --- GET bookings for the logged-in user only ---
 app.get("/bookings", requireAuth, (req, res) => {
   autoAssignStaleBookings();
+  generateCancellationReminders();
   const bookings = db
     .prepare(
       `SELECT b.*, p.name AS professionalName,
@@ -668,6 +670,9 @@ app.get("/cron/reminders", async (req, res) => {
   if (secret !== process.env.ADMIN_SECRET) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  autoAssignStaleBookings();
+  generateCancellationReminders();
+
   const now = new Date();
   const targetMin = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
   const targetDate = targetMin.toISOString().slice(0, 10);
@@ -675,24 +680,39 @@ app.get("/cron/reminders", async (req, res) => {
 
   const upcomingBookings = db
     .prepare(
-      `SELECT b.*, u.pushToken, u.name as userName
-       FROM bookings b
+      `SELECT b.* FROM bookings b
        JOIN users u ON u.id = b.userId
-       WHERE b.date = ? AND b.time = ? AND u.pushToken IS NOT NULL AND u.pushToken != ''`
+       WHERE b.date = ? AND b.time = ? AND b.userId != 'guest'`
     )
     .all(targetDate, targetTime);
 
-  let sent = 0;
-  for (const booking of upcomingBookings) {
-    await sendPushNotification(
-      booking.pushToken,
+  upcomingBookings.forEach((booking) => {
+    notify(
+      booking.userId,
       "Appointment in 1 hour! ⏰",
-      `${booking.salonName} · ${booking.serviceName} at ${booking.time}`
+      `${booking.salonName} · ${booking.serviceName} at ${booking.time}`,
+      "appointment_reminder",
+      { bookingId: booking.id }
     );
-    sent++;
-  }
+  });
 
-  res.json({ checked: targetDate + " " + targetTime, sent });
+  res.json({ checked: targetDate + " " + targetTime, sent: upcomingBookings.length });
+});
+
+// --- GET the logged-in user's notification history ---
+app.get("/notifications", requireAuth, (req, res) => {
+  generateCancellationReminders();
+  const notifications = db
+    .prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT 100")
+    .all(req.userId)
+    .map((n) => ({ ...n, data: n.data ? JSON.parse(n.data) : null }));
+  res.json(notifications);
+});
+
+// --- PUT mark all of the logged-in user's notifications as read ---
+app.put("/notifications/read-all", requireAuth, (req, res) => {
+  db.prepare("UPDATE notifications SET read = 1 WHERE userId = ? AND read = 0").run(req.userId);
+  res.json({ marked: true });
 });
 
 app.listen(PORT, "0.0.0.0", () => {

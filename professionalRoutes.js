@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("./db");
 const { requireAuth, requireProfessional } = require("./authMiddleware");
-const { sendPushNotification } = require("./pushHelper");
+const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
 
 const router = express.Router();
@@ -128,14 +128,13 @@ router.post("/available-bookings/:id/accept", (req, res) => {
     return res.status(409).json({ error: "This booking was just claimed by another professional" });
   }
 
-  const customer = db.prepare("SELECT pushToken FROM users WHERE id = ?").get(booking.userId);
-  if (customer?.pushToken) {
-    sendPushNotification(
-      customer.pushToken,
-      "Professional Assigned ✂️",
-      `${professional.name} will handle your ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`
-    );
-  }
+  notify(
+    booking.userId,
+    "Professional Assigned ✂️",
+    `${professional.name} will handle your ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`,
+    "professional_assigned",
+    { bookingId: booking.id }
+  );
 
   res.json({ ...booking, professionalId: professional.id });
 });

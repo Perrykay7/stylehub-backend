@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { requireAuth } = require("./authMiddleware");
-const { sendPushNotification } = require("./pushHelper");
+const { notify } = require("./notify");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
@@ -254,14 +254,13 @@ router.put("/admin/invite-code", (req, res) => {
   ).run(code);
 
   affectedOwners.forEach((owner) => {
-    if (owner.pushToken) {
-      sendPushNotification(
-        owner.pushToken,
-        "Re-verification required",
-        "The salon owner referral code has changed. Tap to enter the new code and keep your access.",
-        { type: "reverify", role: "owner" }
-      );
-    }
+    notify(
+      owner.id,
+      "Re-verification required",
+      "The salon owner referral code has changed. Tap to enter the new code and keep your access.",
+      "reverify",
+      { role: "owner" }
+    );
   });
 
   res.json({ message: "Invite code updated", ownersDowngraded: downgraded.changes });
@@ -298,14 +297,13 @@ router.put("/admin/professional-invite-code", (req, res) => {
   ).run(code);
 
   affectedProfessionals.forEach((professional) => {
-    if (professional.pushToken) {
-      sendPushNotification(
-        professional.pushToken,
-        "Re-verification required",
-        "The professional referral code has changed. Tap to enter the new code and keep your access.",
-        { type: "reverify", role: "professional" }
-      );
-    }
+    notify(
+      professional.id,
+      "Re-verification required",
+      "The professional referral code has changed. Tap to enter the new code and keep your access.",
+      "reverify",
+      { role: "professional" }
+    );
   });
 
   res.json({ message: "Professional invite code updated", professionalsDowngraded: downgraded.changes });

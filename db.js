@@ -175,6 +175,26 @@ if (!columnExists("bookings", "noPreference")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN noPreference INTEGER NOT NULL DEFAULT 0`);
 }
 
+// --- Migration: track whether the 2-hour cancellation-window reminder was sent ---
+if (!columnExists("bookings", "reminderSent")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN reminderSent INTEGER NOT NULL DEFAULT 0`);
+}
+
+// --- Migration: in-app notification history ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    type TEXT NOT NULL,
+    data TEXT,
+    read INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+`);
+
 // --- Migration: add blocked_slots table ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS blocked_slots (
