@@ -417,7 +417,73 @@ router.delete("/professionals/:id", (req, res) => {
   }
 
   db.prepare("DELETE FROM professional_services WHERE professionalId = ?").run(req.params.id);
+  db.prepare("DELETE FROM professional_unavailability WHERE professionalId = ?").run(req.params.id);
   db.prepare("DELETE FROM professionals WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
+
+function getOwnedProfessional(req) {
+  const professional = db.prepare("SELECT * FROM professionals WHERE id = ?").get(req.params.id);
+  if (!professional) return null;
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(professional.salonId);
+  if (!salon || salon.ownerId !== req.userId) return null;
+  return professional;
+}
+
+// --- GET this professional's unavailability blocks for a given date ---
+router.get("/professionals/:id/unavailability", (req, res) => {
+  const professional = getOwnedProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+  const { date } = req.query;
+  const blocks = date
+    ? db
+        .prepare("SELECT * FROM professional_unavailability WHERE professionalId = ? AND date = ? ORDER BY time ASC")
+        .all(req.params.id, date)
+    : db
+        .prepare("SELECT * FROM professional_unavailability WHERE professionalId = ? ORDER BY date ASC, time ASC")
+        .all(req.params.id);
+  res.json(blocks);
+});
+
+// --- POST mark this professional unavailable for a date (whole day) or a specific time ---
+router.post("/professionals/:id/unavailability", (req, res) => {
+  const professional = getOwnedProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  const { date, time } = req.body;
+  if (!date) {
+    return res.status(400).json({ error: "date is required" });
+  }
+
+  const block = {
+    id: uuidv4(),
+    professionalId: req.params.id,
+    date,
+    time: time || null,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO professional_unavailability (id, professionalId, date, time, createdAt) VALUES (@id, @professionalId, @date, @time, @createdAt)`
+  ).run(block);
+
+  res.status(201).json(block);
+});
+
+// --- DELETE an unavailability block, restoring that time (or day) ---
+router.delete("/professionals/:id/unavailability/:blockId", (req, res) => {
+  const professional = getOwnedProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  db.prepare("DELETE FROM professional_unavailability WHERE id = ? AND professionalId = ?").run(
+    req.params.blockId,
+    req.params.id
+  );
   res.json({ deleted: true });
 });
 

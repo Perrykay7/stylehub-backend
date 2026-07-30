@@ -3,6 +3,7 @@ const db = require("./db");
 const { requireAuth, requireProfessional } = require("./authMiddleware");
 const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
+const { isProfessionalUnavailable } = require("./professionalAvailability");
 
 const router = express.Router();
 
@@ -118,6 +119,9 @@ router.post("/available-bookings/:id/accept", (req, res) => {
     .get(professional.id, booking.date, booking.time);
   if (conflict) {
     return res.status(409).json({ error: "You already have a booking at this time" });
+  }
+  if (isProfessionalUnavailable(professional.id, booking.date, booking.time)) {
+    return res.status(409).json({ error: "You're marked unavailable at this time" });
   }
 
   const result = db

@@ -1,5 +1,6 @@
 const db = require("./db");
 const { notify } = require("./notify");
+const { isProfessionalUnavailable } = require("./professionalAvailability");
 
 // If nobody claims a "No Preference" booking before it's this close to
 // starting, auto-assign the least-busy free professional so the customer
@@ -21,7 +22,8 @@ function findFreeQualifiedProfessionals(salonId, serviceId, date, time, excludeB
         "SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ? AND id != ?"
       )
       .get(p.id, date, time, excludeBookingId || "");
-    return !conflict;
+    if (conflict) return false;
+    return !isProfessionalUnavailable(p.id, date, time);
   });
 }
 

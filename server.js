@@ -11,6 +11,11 @@ const ownerRoutes = require("./ownerRoutes");
 const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
+const {
+  generateTimeSlots,
+  isProfessionalUnavailable,
+  isProfessionalOffAllDay,
+} = require("./professionalAvailability");
 
 const app = express();
 app.use(cors());
@@ -237,7 +242,7 @@ app.post("/salons/:id/reviews", requireAuth, (req, res) => {
 
 // --- GET professionals at a salon who perform a specific service ---
 app.get("/salons/:id/professionals", (req, res) => {
-  const { serviceId } = req.query;
+  const { serviceId, date } = req.query;
   if (!serviceId) {
     return res.status(400).json({ error: "serviceId query parameter is required" });
   }
@@ -261,6 +266,7 @@ app.get("/salons/:id/professionals", (req, res) => {
       ...pro,
       avgRating: stats.avgRating ? Math.round(stats.avgRating * 10) / 10 : null,
       ratingCount: stats.ratingCount,
+      unavailableAllDay: date ? isProfessionalOffAllDay(pro.id, date) : false,
     };
   });
 
@@ -268,8 +274,10 @@ app.get("/salons/:id/professionals", (req, res) => {
 });
 
 // --- GET already-booked time slots for a salon on a specific date ---
+// Pass professionalId to get that specific professional's own busy slots
+// instead of the salon-wide "every qualified professional is busy" slots.
 app.get("/salons/:id/booked-slots", (req, res) => {
-  const { date, serviceId } = req.query;
+  const { date, serviceId, professionalId } = req.query;
   if (!date) {
     return res.status(400).json({ error: "date query parameter is required" });
   }
@@ -289,7 +297,23 @@ app.get("/salons/:id/booked-slots", (req, res) => {
 
   let fullTimes = [];
 
-  if (serviceId) {
+  if (professionalId) {
+    // A specific professional was picked — show only their own busy times.
+    if (isProfessionalOffAllDay(professionalId, date)) {
+      const salon = db.prepare("SELECT openTime, closeTime FROM salons WHERE id = ?").get(req.params.id);
+      fullTimes = salon ? generateTimeSlots(salon.openTime, salon.closeTime) : [];
+    } else {
+      const bookedTimes = db
+        .prepare("SELECT time FROM bookings WHERE professionalId = ? AND date = ?")
+        .all(professionalId, date)
+        .map((r) => r.time);
+      const unavailableTimes = db
+        .prepare("SELECT time FROM professional_unavailability WHERE professionalId = ? AND date = ? AND time IS NOT NULL")
+        .all(professionalId, date)
+        .map((r) => r.time);
+      fullTimes = [...bookedTimes, ...unavailableTimes];
+    }
+  } else if (serviceId) {
     // Get professionals who can perform this service at this salon
     const pros = db
       .prepare(
@@ -300,21 +324,18 @@ app.get("/salons/:id/booked-slots", (req, res) => {
       .all(req.params.id, serviceId);
 
     if (pros.length > 0) {
-      // A slot is full only when ALL professionals for this service are booked at that time
-      const placeholders = pros.map(() => "?").join(",");
-      const proIds = pros.map((p) => p.id);
-      const bookedAtTimes = db
-        .prepare(
-          `SELECT time, COUNT(DISTINCT professionalId) as bookedCount
-           FROM bookings
-           WHERE salonId = ? AND date = ? AND professionalId IN (${placeholders})
-           GROUP BY time`
-        )
-        .all(req.params.id, date, ...proIds);
-
-      fullTimes = bookedAtTimes
-        .filter((r) => r.bookedCount >= pros.length)
-        .map((r) => r.time);
+      // A slot is full only when EVERY professional for this service is
+      // either booked or marked unavailable (owner time-off) at that time.
+      const salon = db.prepare("SELECT openTime, closeTime FROM salons WHERE id = ?").get(req.params.id);
+      const allSlots = salon ? generateTimeSlots(salon.openTime, salon.closeTime) : [];
+      fullTimes = allSlots.filter((time) =>
+        pros.every((p) => {
+          const booked = db
+            .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+            .get(p.id, date, time);
+          return !!booked || isProfessionalUnavailable(p.id, date, time);
+        })
+      );
     } else {
       // No professionals set up — fall back to one-per-slot
       fullTimes = db
@@ -381,8 +402,8 @@ app.post("/bookings", requireAuth, (req, res) => {
     const conflict = db
       .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
       .get(finalProfessionalId, date, time);
-    if (conflict) {
-      return res.status(409).json({ error: "That professional is no longer available at this time. Please choose another." });
+    if (conflict || isProfessionalUnavailable(finalProfessionalId, date, time)) {
+      return res.status(409).json({ error: "That professional is not available at this time. Please choose another." });
     }
   } else {
     // "No Preference" — leave unassigned so any qualified, free professional can

@@ -195,6 +195,19 @@ db.exec(`
   );
 `);
 
+// --- Migration: let owners mark a professional unavailable for a specific
+// time slot or a whole day (e.g. time off, personal appointments) ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS professional_unavailability (
+    id TEXT PRIMARY KEY,
+    professionalId TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (professionalId) REFERENCES professionals(id)
+  );
+`);
+
 // --- Migration: add blocked_slots table ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS blocked_slots (
