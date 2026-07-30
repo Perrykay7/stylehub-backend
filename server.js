@@ -10,6 +10,7 @@ const authRoutes = require("./auth");
 const ownerRoutes = require("./ownerRoutes");
 const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
+const { attachImages } = require("./serviceImages");
 
 const app = express();
 app.use(cors());
@@ -91,6 +92,41 @@ app.post(
     res.json({ photoUrl });
   }
 );
+// --- POST upload a service's photo (owner only) ---
+const serviceUploadsDir = path.join("/data", "uploads", "services");
+fs.mkdirSync(serviceUploadsDir, { recursive: true });
+
+const serviceStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, serviceUploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+const serviceUpload = multer({
+  storage: serviceStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
+  },
+});
+
+app.post(
+  "/upload/service-photo",
+  requireAuth,
+  serviceUpload.single("photo"),
+  (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No photo uploaded" });
+    }
+    const photoUrl = `${req.protocol}://${req.get("host")}/uploads/services/${req.file.filename}`;
+    res.json({ photoUrl });
+  }
+);
 // --- Auth routes (public) ---
 app.use("/auth", authRoutes);
 
@@ -103,9 +139,9 @@ app.get("/salons", (req, res) => {
   const salons = db.prepare("SELECT * FROM salons ORDER BY createdAt DESC").all();
 
   const fullSalons = salons.map((salon) => {
-    const services = db
-      .prepare("SELECT * FROM services WHERE salonId = ?")
-      .all(salon.id);
+    const services = attachImages(
+      db.prepare("SELECT * FROM services WHERE salonId = ?").all(salon.id)
+    );
     const reviews = db
       .prepare("SELECT * FROM reviews WHERE salonId = ?")
       .all(salon.id);
@@ -134,9 +170,9 @@ app.get("/salons/:id", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const services = db
-    .prepare("SELECT * FROM services WHERE salonId = ?")
-    .all(salon.id);
+  const services = attachImages(
+    db.prepare("SELECT * FROM services WHERE salonId = ?").all(salon.id)
+  );
   const reviews = db
     .prepare("SELECT * FROM reviews WHERE salonId = ?")
     .all(salon.id);

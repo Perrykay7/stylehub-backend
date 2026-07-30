@@ -4,6 +4,7 @@ const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
 const { sendPushNotification } = require("./pushHelper");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
+const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 
 const router = express.Router();
 
@@ -17,9 +18,9 @@ router.get("/salons", (req, res) => {
     .all(req.userId);
 
   const fullSalons = salons.map((salon) => {
-    const services = db
-      .prepare("SELECT * FROM services WHERE salonId = ?")
-      .all(salon.id);
+    const services = attachImages(
+      db.prepare("SELECT * FROM services WHERE salonId = ?").all(salon.id)
+    );
     return { ...salon, services };
   });
 
@@ -175,7 +176,63 @@ router.delete("/services/:id", (req, res) => {
   }
 
   db.prepare("DELETE FROM professional_services WHERE serviceId = ?").run(req.params.id);
+  db.prepare("DELETE FROM service_images WHERE serviceId = ?").run(req.params.id);
   db.prepare("DELETE FROM services WHERE id = ?").run(req.params.id);
+  res.json({ deleted: true });
+});
+
+function getOwnedService(req) {
+  const service = db.prepare("SELECT * FROM services WHERE id = ?").get(req.params.id);
+  if (!service) return null;
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(service.salonId);
+  if (!salon || salon.ownerId !== req.userId) return null;
+  return service;
+}
+
+// --- POST add a photo to a service (max 3 per service) ---
+router.post("/services/:id/images", (req, res) => {
+  const service = getOwnedService(req);
+  if (!service) {
+    return res.status(404).json({ error: "Service not found" });
+  }
+
+  const { imageUrl } = req.body;
+  if (!imageUrl) {
+    return res.status(400).json({ error: "imageUrl is required" });
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM service_images WHERE serviceId = ?")
+    .all(req.params.id);
+  if (existing.length >= MAX_IMAGES_PER_SERVICE) {
+    return res.status(400).json({ error: `You can add up to ${MAX_IMAGES_PER_SERVICE} photos per service` });
+  }
+
+  const image = {
+    id: uuidv4(),
+    serviceId: req.params.id,
+    imageUrl,
+    position: existing.length,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO service_images (id, serviceId, imageUrl, position, createdAt) VALUES (@id, @serviceId, @imageUrl, @position, @createdAt)`
+  ).run(image);
+
+  res.status(201).json(image);
+});
+
+// --- DELETE a service photo ---
+router.delete("/services/:id/images/:imageId", (req, res) => {
+  const service = getOwnedService(req);
+  if (!service) {
+    return res.status(404).json({ error: "Service not found" });
+  }
+
+  db.prepare("DELETE FROM service_images WHERE id = ? AND serviceId = ?").run(
+    req.params.imageId,
+    req.params.id
+  );
   res.json({ deleted: true });
 });
 

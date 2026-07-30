@@ -235,6 +235,18 @@ if (!columnExists("services", "category")) {
   db.exec(`ALTER TABLE services ADD COLUMN category TEXT`);
 }
 
+// --- Migration: add service photos (owners can add up to 3 per service) ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS service_images (
+    id TEXT PRIMARY KEY,
+    serviceId TEXT NOT NULL,
+    imageUrl TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (serviceId) REFERENCES services(id)
+  );
+`);
+
 // --- Migration: add favorites ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS favorites (
