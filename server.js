@@ -736,6 +736,51 @@ app.put("/notifications/read-all", requireAuth, (req, res) => {
   res.json({ marked: true });
 });
 
+// --- GET the logged-in user's notification channel preferences ---
+app.get("/notification-preferences", requireAuth, (req, res) => {
+  const user = db
+    .prepare(
+      `SELECT smsAppointmentNotifications, whatsappAppointmentNotifications,
+       smsMarketingNotifications, whatsappMarketingNotifications
+       FROM users WHERE id = ?`
+    )
+    .get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+  res.json({
+    smsAppointmentNotifications: !!user.smsAppointmentNotifications,
+    whatsappAppointmentNotifications: !!user.whatsappAppointmentNotifications,
+    smsMarketingNotifications: !!user.smsMarketingNotifications,
+    whatsappMarketingNotifications: !!user.whatsappMarketingNotifications,
+  });
+});
+
+// --- PUT update the logged-in user's notification channel preferences ---
+app.put("/notification-preferences", requireAuth, (req, res) => {
+  const {
+    smsAppointmentNotifications,
+    whatsappAppointmentNotifications,
+    smsMarketingNotifications,
+    whatsappMarketingNotifications,
+  } = req.body;
+
+  db.prepare(
+    `UPDATE users SET
+       smsAppointmentNotifications = @smsAppointmentNotifications,
+       whatsappAppointmentNotifications = @whatsappAppointmentNotifications,
+       smsMarketingNotifications = @smsMarketingNotifications,
+       whatsappMarketingNotifications = @whatsappMarketingNotifications
+     WHERE id = @userId`
+  ).run({
+    userId: req.userId,
+    smsAppointmentNotifications: smsAppointmentNotifications ? 1 : 0,
+    whatsappAppointmentNotifications: whatsappAppointmentNotifications ? 1 : 0,
+    smsMarketingNotifications: smsMarketingNotifications ? 1 : 0,
+    whatsappMarketingNotifications: whatsappMarketingNotifications ? 1 : 0,
+  });
+
+  res.json({ updated: true });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`StyleHub backend running on http://0.0.0.0:${PORT}`);
 });

@@ -245,6 +245,20 @@ if (!columnExists("users", "pushToken")) {
   db.exec(`ALTER TABLE users ADD COLUMN pushToken TEXT`);
 }
 
+// --- Migration: per-channel notification preferences (email intentionally omitted) ---
+if (!columnExists("users", "smsAppointmentNotifications")) {
+  db.exec(`ALTER TABLE users ADD COLUMN smsAppointmentNotifications INTEGER NOT NULL DEFAULT 1`);
+}
+if (!columnExists("users", "whatsappAppointmentNotifications")) {
+  db.exec(`ALTER TABLE users ADD COLUMN whatsappAppointmentNotifications INTEGER NOT NULL DEFAULT 1`);
+}
+if (!columnExists("users", "smsMarketingNotifications")) {
+  db.exec(`ALTER TABLE users ADD COLUMN smsMarketingNotifications INTEGER NOT NULL DEFAULT 1`);
+}
+if (!columnExists("users", "whatsappMarketingNotifications")) {
+  db.exec(`ALTER TABLE users ADD COLUMN whatsappMarketingNotifications INTEGER NOT NULL DEFAULT 1`);
+}
+
 // --- Migration: let professionals sign in and claim their roster entry ---
 if (!columnExists("professionals", "userId")) {
   db.exec(`ALTER TABLE professionals ADD COLUMN userId TEXT`);
