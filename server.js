@@ -687,6 +687,32 @@ app.get("/salons/:salonId/my-promo", requireAuth, (req, res) => {
   res.json(promo);
 });
 
+// --- GET the logged-in customer's loyalty progress at a salon ---
+app.get("/salons/:salonId/my-loyalty-status", requireAuth, (req, res) => {
+  const settings = db
+    .prepare("SELECT * FROM loyalty_settings WHERE salonId = ?")
+    .get(req.params.salonId);
+
+  if (!settings || !settings.enabled) {
+    return res.json({ enabled: false });
+  }
+
+  const { count } = db
+    .prepare("SELECT COUNT(*) as count FROM bookings WHERE salonId = ? AND userId = ?")
+    .get(req.params.salonId, req.userId);
+
+  const remainder = count % settings.visitsRequired;
+  const visitsUntilNextReward = remainder === 0 ? settings.visitsRequired : settings.visitsRequired - remainder;
+
+  res.json({
+    enabled: true,
+    visitsRequired: settings.visitsRequired,
+    discountPercent: settings.discountPercent,
+    currentVisitCount: count,
+    visitsUntilNextReward,
+  });
+});
+
 // --- GET /cron/reminders — send push reminders for bookings 1 hour from now ---
 // Call this every 5-10 minutes from an external cron (e.g. cron-job.org)
 app.get("/cron/reminders", async (req, res) => {
