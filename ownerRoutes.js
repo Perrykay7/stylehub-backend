@@ -604,6 +604,52 @@ router.delete("/promo-codes/:id", (req, res) => {
   res.json({ deleted: true });
 });
 
+// --- GET this salon's loyalty program settings ---
+router.get("/salons/:salonId/loyalty", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const settings = db
+    .prepare("SELECT * FROM loyalty_settings WHERE salonId = ?")
+    .get(req.params.salonId);
+
+  res.json(
+    settings || { salonId: req.params.salonId, enabled: 0, visitsRequired: 5, discountPercent: 10 }
+  );
+});
+
+// --- PUT update this salon's loyalty program settings ---
+router.put("/salons/:salonId/loyalty", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const { enabled, visitsRequired, discountPercent } = req.body;
+  if (!visitsRequired || visitsRequired < 2) {
+    return res.status(400).json({ error: "visitsRequired must be at least 2" });
+  }
+  if (!discountPercent || discountPercent <= 0 || discountPercent > 100) {
+    return res.status(400).json({ error: "discountPercent must be between 1 and 100" });
+  }
+
+  db.prepare(
+    `INSERT INTO loyalty_settings (salonId, enabled, visitsRequired, discountPercent)
+     VALUES (@salonId, @enabled, @visitsRequired, @discountPercent)
+     ON CONFLICT(salonId) DO UPDATE SET
+       enabled = @enabled, visitsRequired = @visitsRequired, discountPercent = @discountPercent`
+  ).run({
+    salonId: req.params.salonId,
+    enabled: enabled ? 1 : 0,
+    visitsRequired,
+    discountPercent,
+  });
+
+  res.json(db.prepare("SELECT * FROM loyalty_settings WHERE salonId = ?").get(req.params.salonId));
+});
+
 // --- GET working hours for a salon (all 7 days) ---
 router.get("/salons/:salonId/hours", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);

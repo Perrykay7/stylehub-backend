@@ -366,6 +366,7 @@ app.post("/users/push-token", requireAuth, (req, res) => {
 const { notify } = require("./notify");
 const { autoAssignStaleBookings, findFreeQualifiedProfessionals } = require("./bookingAssignment");
 const { generateCancellationReminders } = require("./reminders");
+const { checkLoyaltyMilestone } = require("./loyalty");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
@@ -476,6 +477,8 @@ app.post("/bookings", requireAuth, (req, res) => {
     "booking_confirmed",
     { bookingId: booking.id }
   );
+
+  checkLoyaltyMilestone(salonId, req.userId, salonName);
 
   if (noPreference && professionalsToNotify.length > 0) {
     const placeholders = professionalsToNotify.map(() => "?").join(",");

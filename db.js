@@ -259,6 +259,29 @@ if (!columnExists("users", "whatsappMarketingNotifications")) {
   db.exec(`ALTER TABLE users ADD COLUMN whatsappMarketingNotifications INTEGER NOT NULL DEFAULT 1`);
 }
 
+// --- Migration: per-salon loyalty program (every Nth visit earns a discount) ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS loyalty_settings (
+    salonId TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    visitsRequired INTEGER NOT NULL DEFAULT 5,
+    discountPercent REAL NOT NULL DEFAULT 10,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS loyalty_rewards (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    visitCount INTEGER NOT NULL,
+    promoCodeId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (promoCodeId) REFERENCES promo_codes(id)
+  );
+`);
+
 // --- Migration: let professionals sign in and claim their roster entry ---
 if (!columnExists("professionals", "userId")) {
   db.exec(`ALTER TABLE professionals ADD COLUMN userId TEXT`);
