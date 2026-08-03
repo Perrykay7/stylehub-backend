@@ -630,4 +630,22 @@ if (!seedSalonsRemoved) {
   ).run();
 }
 
+// --- Migration: booking cancellation log + no-show tracking (for owner analytics) ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS booking_events (
+    id TEXT PRIMARY KEY,
+    bookingId TEXT NOT NULL,
+    salonId TEXT NOT NULL,
+    serviceId TEXT NOT NULL,
+    professionalId TEXT,
+    price REAL NOT NULL,
+    date TEXT NOT NULL,
+    eventType TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  );
+`);
+if (!columnExists("bookings", "status")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN status TEXT`);
+}
+
 module.exports = db;

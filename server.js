@@ -521,6 +521,20 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     });
   }
 
+  db.prepare(
+    `INSERT INTO booking_events (id, bookingId, salonId, serviceId, professionalId, price, date, eventType, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'cancelled', ?)`
+  ).run(
+    uuidv4(),
+    booking.id,
+    booking.salonId,
+    booking.serviceId,
+    booking.professionalId,
+    booking.price,
+    booking.date,
+    new Date().toISOString()
+  );
+
   db.prepare("DELETE FROM bookings WHERE id = ?").run(req.params.id);
 
   // Notify the salon owner about the cancellation

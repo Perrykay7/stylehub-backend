@@ -319,6 +319,31 @@ router.get("/bookings", (req, res) => {
   res.json(withDisplayInfo);
 });
 
+// --- PATCH mark a past booking as a no-show (or undo that) ---
+router.patch("/bookings/:id/no-show", (req, res) => {
+  const booking = db
+    .prepare(
+      `SELECT b.* FROM bookings b
+       INNER JOIN salons s ON b.salonId = s.id
+       WHERE b.id = ? AND s.ownerId = ?`
+    )
+    .get(req.params.id, req.userId);
+  if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+  const appointmentDateTime = new Date(`${booking.date}T${booking.time}:00`);
+  if (appointmentDateTime.getTime() > Date.now()) {
+    return res.status(400).json({ error: "Can't mark a future booking as a no-show." });
+  }
+
+  const noShow = !!req.body.noShow;
+  db.prepare("UPDATE bookings SET status = ? WHERE id = ?").run(
+    noShow ? "no_show" : null,
+    req.params.id
+  );
+
+  res.json({ id: req.params.id, status: noShow ? "no_show" : null });
+});
+
 // --- GET customers who have booked at one of this owner's salons ---
 router.get("/salons/:salonId/customers", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
@@ -793,6 +818,101 @@ router.get("/stats", (req, res) => {
   ).get(...salonIds);
 
   res.json({ totalBookings, totalRevenue, totalCustomers, topServices, recentBookings, monthlyRevenue, monthlyBookings, recentReviews, avgRating: Math.round(avgRating.avg * 10) / 10, totalReviews: avgRating.count });
+});
+
+// --- GET per-salon analytics (revenue/volume over time, cancellation & no-show rate,
+// per-professional performance, top services) ---
+router.get("/salons/:salonId/analytics", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const range = ["week", "month", "all"].includes(req.query.range) ? req.query.range : "month";
+  const todayIso = new Date().toISOString().slice(0, 10);
+  let sinceIso = "0000-00-00";
+  if (range === "week") {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    sinceIso = d.toISOString().slice(0, 10);
+  } else if (range === "month") {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    sinceIso = d.toISOString().slice(0, 10);
+  }
+
+  const salonId = req.params.salonId;
+
+  const revenueOverTime = db
+    .prepare(
+      `SELECT date, COUNT(*) as bookingCount, COALESCE(SUM(price), 0) as revenue
+       FROM bookings WHERE salonId = ? AND date >= ?
+       GROUP BY date ORDER BY date ASC`
+    )
+    .all(salonId, sinceIso);
+
+  const activeBookingCount = db
+    .prepare(`SELECT COUNT(*) as count FROM bookings WHERE salonId = ? AND date >= ?`)
+    .get(salonId, sinceIso).count;
+
+  const cancelledCount = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM booking_events
+       WHERE salonId = ? AND eventType = 'cancelled' AND date >= ?`
+    )
+    .get(salonId, sinceIso).count;
+
+  const totalAttempted = activeBookingCount + cancelledCount;
+  const cancellationRate = totalAttempted > 0 ? cancelledCount / totalAttempted : 0;
+
+  const pastBookingsCount = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM bookings WHERE salonId = ? AND date >= ? AND date < ?`
+    )
+    .get(salonId, sinceIso, todayIso).count;
+
+  const noShowCount = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM bookings
+       WHERE salonId = ? AND date >= ? AND date < ? AND status = 'no_show'`
+    )
+    .get(salonId, sinceIso, todayIso).count;
+
+  const noShowRate = pastBookingsCount > 0 ? noShowCount / pastBookingsCount : 0;
+
+  const perProfessional = db
+    .prepare(
+      `SELECT p.id as professionalId, p.name,
+              COUNT(b.id) as bookingCount,
+              COALESCE(SUM(b.price), 0) as revenue,
+              (SELECT COALESCE(AVG(rating), 0) FROM professional_ratings WHERE professionalId = p.id) as avgRating
+       FROM professionals p
+       LEFT JOIN bookings b ON b.professionalId = p.id AND b.date >= ?
+       WHERE p.salonId = ?
+       GROUP BY p.id
+       ORDER BY revenue DESC`
+    )
+    .all(sinceIso, salonId)
+    .map((p) => ({ ...p, avgRating: Math.round(p.avgRating * 10) / 10 }));
+
+  const topServices = db
+    .prepare(
+      `SELECT serviceName, COUNT(*) as bookingCount, COALESCE(SUM(price), 0) as revenue
+       FROM bookings WHERE salonId = ? AND date >= ?
+       GROUP BY serviceName ORDER BY bookingCount DESC LIMIT 5`
+    )
+    .all(salonId, sinceIso);
+
+  res.json({
+    range,
+    revenueOverTime,
+    cancellationRate,
+    cancelledCount,
+    noShowRate,
+    noShowCount,
+    perProfessional,
+    topServices,
+  });
 });
 
 // --- POST announce a message to all customers of a salon ---
