@@ -26,36 +26,53 @@ function checkLoyaltyMilestone(salonId, userId, salonName) {
     .get(salonId, userId, count);
   if (alreadyRewarded) return;
 
-  const promoCode = {
-    id: uuidv4(),
-    salonId,
-    code: `LOYALTY-${uuidv4().slice(0, 8).toUpperCase()}`,
-    discountPercent: settings.discountPercent,
-    active: 1,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + REWARD_VALID_DAYS * 24 * 60 * 60 * 1000).toISOString(),
-  };
-  db.prepare(
-    `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt, expiresAt)
-     VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt, @expiresAt)`
-  ).run(promoCode);
+  const hasDiscount = settings.discountPercent > 0;
+  let promoCodeId = null;
 
-  db.prepare(
-    "INSERT INTO promo_code_recipients (id, promoCodeId, userId) VALUES (?, ?, ?)"
-  ).run(uuidv4(), promoCode.id, userId);
+  if (hasDiscount) {
+    const promoCode = {
+      id: uuidv4(),
+      salonId,
+      code: `LOYALTY-${uuidv4().slice(0, 8).toUpperCase()}`,
+      discountPercent: settings.discountPercent,
+      active: 1,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + REWARD_VALID_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+    };
+    db.prepare(
+      `INSERT INTO promo_codes (id, salonId, code, discountPercent, active, createdAt, expiresAt)
+       VALUES (@id, @salonId, @code, @discountPercent, @active, @createdAt, @expiresAt)`
+    ).run(promoCode);
+
+    db.prepare(
+      "INSERT INTO promo_code_recipients (id, promoCodeId, userId) VALUES (?, ?, ?)"
+    ).run(uuidv4(), promoCode.id, userId);
+
+    promoCodeId = promoCode.id;
+  }
 
   db.prepare(
     `INSERT INTO loyalty_rewards (id, salonId, userId, visitCount, promoCodeId, createdAt)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(uuidv4(), salonId, userId, count, promoCode.id, new Date().toISOString());
+  ).run(uuidv4(), salonId, userId, count, promoCodeId, new Date().toISOString());
 
-  notify(
-    userId,
-    "🎉 Loyalty Reward Earned!",
-    `You've earned ${settings.discountPercent}% off your next visit to ${salonName} — it'll apply automatically at checkout.`,
-    "loyalty_reward",
-    { salonId, promoCodeId: promoCode.id }
-  );
+  if (hasDiscount) {
+    notify(
+      userId,
+      "🎉 Loyalty Reward Earned!",
+      `You've earned ${settings.discountPercent}% off your next visit to ${salonName} — it'll apply automatically at checkout.`,
+      "loyalty_reward",
+      { salonId, promoCodeId }
+    );
+  } else {
+    notify(
+      userId,
+      "🎉 Loyalty Milestone Reached!",
+      `You've reached a new loyalty milestone at ${salonName}. Thank you for being a loyal customer!`,
+      "loyalty_reward",
+      { salonId }
+    );
+  }
 }
 
 module.exports = { checkLoyaltyMilestone };

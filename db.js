@@ -282,6 +282,31 @@ db.exec(`
   );
 `);
 
+// --- Migration: allow loyalty rewards with no discount (recognition-only,
+// e.g. badges/tiers), which have no promo code ---
+{
+  const loyaltyRewardsCols = db.prepare("PRAGMA table_info(loyalty_rewards)").all();
+  const promoCodeIdCol = loyaltyRewardsCols.find((c) => c.name === "promoCodeId");
+  if (promoCodeIdCol && promoCodeIdCol.notnull === 1) {
+    db.exec(`
+      CREATE TABLE loyalty_rewards_new (
+        id TEXT PRIMARY KEY,
+        salonId TEXT NOT NULL,
+        userId TEXT NOT NULL,
+        visitCount INTEGER NOT NULL,
+        promoCodeId TEXT,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (salonId) REFERENCES salons(id),
+        FOREIGN KEY (userId) REFERENCES users(id),
+        FOREIGN KEY (promoCodeId) REFERENCES promo_codes(id)
+      );
+      INSERT INTO loyalty_rewards_new SELECT * FROM loyalty_rewards;
+      DROP TABLE loyalty_rewards;
+      ALTER TABLE loyalty_rewards_new RENAME TO loyalty_rewards;
+    `);
+  }
+}
+
 // --- Migration: let professionals sign in and claim their roster entry ---
 if (!columnExists("professionals", "userId")) {
   db.exec(`ALTER TABLE professionals ADD COLUMN userId TEXT`);

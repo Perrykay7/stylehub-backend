@@ -631,8 +631,9 @@ router.put("/salons/:salonId/loyalty", (req, res) => {
   if (!visitsRequired || visitsRequired < 2) {
     return res.status(400).json({ error: "visitsRequired must be at least 2" });
   }
-  if (!discountPercent || discountPercent <= 0 || discountPercent > 100) {
-    return res.status(400).json({ error: "discountPercent must be between 1 and 100" });
+  // 0 is allowed — a recognition-only program (badges/tiers, no discount).
+  if (discountPercent == null || discountPercent < 0 || discountPercent > 100) {
+    return res.status(400).json({ error: "discountPercent must be between 0 and 100" });
   }
 
   db.prepare(
