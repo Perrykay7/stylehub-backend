@@ -196,6 +196,25 @@ app.get("/salons/:id", (req, res) => {
   res.json({ ...salon, rating, reviewCount, services, reviews });
 });
 
+// --- GET all of the logged-in customer's chat conversations, across every salon ---
+app.get("/my-conversations", requireAuth, (req, res) => {
+  const conversations = db
+    .prepare(
+      `SELECT m.salonId, s.name as salonName,
+              (SELECT body FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessage,
+              (SELECT createdAt FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessageAt,
+              (SELECT COUNT(*) FROM messages m3 WHERE m3.salonId = m.salonId AND m3.customerId = m.customerId AND m3.senderRole = 'owner' AND m3.readByCustomer = 0) as unreadCount
+       FROM messages m
+       INNER JOIN salons s ON s.id = m.salonId
+       WHERE m.customerId = ?
+       GROUP BY m.salonId
+       ORDER BY lastMessageAt DESC`
+    )
+    .all(req.userId);
+
+  res.json(conversations);
+});
+
 // --- GET the logged-in customer's chat with a salon ---
 app.get("/salons/:id/messages", requireAuth, (req, res) => {
   const salon = db.prepare("SELECT id FROM salons WHERE id = ?").get(req.params.id);
