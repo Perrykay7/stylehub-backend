@@ -33,4 +33,37 @@ function isProfessionalOffAllDay(professionalId, date) {
   return !!row;
 }
 
-module.exports = { generateTimeSlots, isProfessionalUnavailable, isProfessionalOffAllDay };
+// True if every professional qualified for this service is either booked or
+// marked unavailable at this exact date/time (i.e. a customer picking "No
+// Preference" would have nobody free). Falls back to a simple one-booking-
+// per-slot check if the salon has no professionals configured at all.
+function isSlotFullyBooked(salonId, serviceId, date, time) {
+  const pros = db
+    .prepare(
+      `SELECT p.id FROM professionals p
+       INNER JOIN professional_services ps ON ps.professionalId = p.id
+       WHERE p.salonId = ? AND ps.serviceId = ?`
+    )
+    .all(salonId, serviceId);
+
+  if (pros.length === 0) {
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE salonId = ? AND date = ? AND time = ?")
+      .get(salonId, date, time);
+    return !!conflict;
+  }
+
+  return pros.every((p) => {
+    const booked = db
+      .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ?")
+      .get(p.id, date, time);
+    return !!booked || isProfessionalUnavailable(p.id, date, time);
+  });
+}
+
+module.exports = {
+  generateTimeSlots,
+  isProfessionalUnavailable,
+  isProfessionalOffAllDay,
+  isSlotFullyBooked,
+};

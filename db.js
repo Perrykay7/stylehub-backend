@@ -307,6 +307,27 @@ db.exec(`
   }
 }
 
+// --- Migration: waitlist for fully-booked slots ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS waitlist_entries (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    salonId TEXT NOT NULL,
+    serviceId TEXT NOT NULL,
+    professionalId TEXT,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    dateLabel TEXT NOT NULL,
+    salonName TEXT NOT NULL,
+    serviceName TEXT NOT NULL,
+    notified INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    FOREIGN KEY (serviceId) REFERENCES services(id)
+  );
+`);
+
 // --- Migration: let professionals sign in and claim their roster entry ---
 if (!columnExists("professionals", "userId")) {
   db.exec(`ALTER TABLE professionals ADD COLUMN userId TEXT`);

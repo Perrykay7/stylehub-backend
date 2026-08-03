@@ -15,6 +15,7 @@ const {
   generateTimeSlots,
   isProfessionalUnavailable,
   isProfessionalOffAllDay,
+  isSlotFullyBooked,
 } = require("./professionalAvailability");
 
 const app = express();
@@ -367,6 +368,7 @@ const { notify } = require("./notify");
 const { autoAssignStaleBookings, findFreeQualifiedProfessionals } = require("./bookingAssignment");
 const { generateCancellationReminders } = require("./reminders");
 const { checkLoyaltyMilestone } = require("./loyalty");
+const { checkWaitlistOnFreedSlot } = require("./waitlist");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
@@ -534,6 +536,70 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     );
   }
 
+  checkWaitlistOnFreedSlot(booking.salonId, booking.serviceId, booking.date, booking.time, booking.professionalId);
+
+  res.json({ deleted: true });
+});
+
+// --- POST join the waitlist for a fully-booked slot ---
+app.post("/waitlist", requireAuth, (req, res) => {
+  const { salonId, serviceId, professionalId, date, time, dateLabel, salonName, serviceName } = req.body;
+  if (!salonId || !serviceId || !date || !time || !dateLabel || !salonName || !serviceName) {
+    return res.status(400).json({ error: "Missing required waitlist fields" });
+  }
+
+  if (!isSlotFullyBooked(salonId, serviceId, date, time)) {
+    return res.status(400).json({ error: "This slot still has openings — just book it directly." });
+  }
+
+  const existing = db
+    .prepare(
+      `SELECT id FROM waitlist_entries
+       WHERE userId = ? AND salonId = ? AND serviceId = ? AND date = ? AND time = ?
+       AND (professionalId IS ? OR professionalId = ?)`
+    )
+    .get(req.userId, salonId, serviceId, date, time, professionalId || null, professionalId || null);
+  if (existing) {
+    return res.status(409).json({ error: "You're already on the waitlist for this slot." });
+  }
+
+  const entry = {
+    id: uuidv4(),
+    userId: req.userId,
+    salonId,
+    serviceId,
+    professionalId: professionalId || null,
+    date,
+    time,
+    dateLabel,
+    salonName,
+    serviceName,
+    notified: 0,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO waitlist_entries (id, userId, salonId, serviceId, professionalId, date, time, dateLabel, salonName, serviceName, notified, createdAt)
+     VALUES (@id, @userId, @salonId, @serviceId, @professionalId, @date, @time, @dateLabel, @salonName, @serviceName, @notified, @createdAt)`
+  ).run(entry);
+
+  res.status(201).json(entry);
+});
+
+// --- GET the logged-in customer's waitlist entries ---
+app.get("/my-waitlist", requireAuth, (req, res) => {
+  const entries = db
+    .prepare("SELECT * FROM waitlist_entries WHERE userId = ? ORDER BY createdAt DESC")
+    .all(req.userId);
+  res.json(entries);
+});
+
+// --- DELETE leave a waitlist entry ---
+app.delete("/waitlist/:id", requireAuth, (req, res) => {
+  const entry = db.prepare("SELECT * FROM waitlist_entries WHERE id = ?").get(req.params.id);
+  if (!entry || entry.userId !== req.userId) {
+    return res.status(404).json({ error: "Waitlist entry not found" });
+  }
+  db.prepare("DELETE FROM waitlist_entries WHERE id = ?").run(req.params.id);
   res.json({ deleted: true });
 });
 
