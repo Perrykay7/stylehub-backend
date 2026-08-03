@@ -39,4 +39,4 @@ function requireProfessional(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireOwner, requireProfessional };
+module.exports = { requireAuth, requireOwner, requireProfessional, JWT_SECRET };

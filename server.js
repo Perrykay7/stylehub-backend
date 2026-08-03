@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
@@ -11,6 +12,7 @@ const ownerRoutes = require("./ownerRoutes");
 const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
+const { initChatServer, sendMessage } = require("./chat");
 const {
   generateTimeSlots,
   isProfessionalUnavailable,
@@ -192,6 +194,43 @@ app.get("/salons/:id", (req, res) => {
         ) / 10;
 
   res.json({ ...salon, rating, reviewCount, services, reviews });
+});
+
+// --- GET the logged-in customer's chat with a salon ---
+app.get("/salons/:id/messages", requireAuth, (req, res) => {
+  const salon = db.prepare("SELECT id FROM salons WHERE id = ?").get(req.params.id);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const messages = db
+    .prepare(
+      `SELECT * FROM messages WHERE salonId = ? AND customerId = ? ORDER BY createdAt ASC`
+    )
+    .all(req.params.id, req.userId);
+
+  db.prepare(
+    `UPDATE messages SET readByCustomer = 1
+     WHERE salonId = ? AND customerId = ? AND senderRole = 'owner' AND readByCustomer = 0`
+  ).run(req.params.id, req.userId);
+
+  res.json(messages);
+});
+
+// --- POST send a chat message to a salon as the logged-in customer ---
+app.post("/salons/:id/messages", requireAuth, (req, res) => {
+  const salon = db.prepare("SELECT id FROM salons WHERE id = ?").get(req.params.id);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const body = (req.body.body || "").trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: "Message cannot be empty" });
+
+  const message = sendMessage({
+    salonId: req.params.id,
+    customerId: req.userId,
+    senderRole: "customer",
+    body,
+  });
+
+  res.status(201).json(message);
 });
 
 // --- POST a review for a salon (requires auth, one per user per salon, must have booked) ---
@@ -927,6 +966,9 @@ app.put("/notification-preferences", requireAuth, (req, res) => {
   res.json({ updated: true });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+const httpServer = http.createServer(app);
+initChatServer(httpServer);
+
+httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`StyleHub backend running on http://0.0.0.0:${PORT}`);
 });

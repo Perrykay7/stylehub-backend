@@ -1,0 +1,158 @@
+const db = require("./db");
+const { v4: uuidv4 } = require("uuid");
+const { notify } = require("./notify");
+
+// In-memory room registry: `${salonId}:${customerId}` -> Set of { ws, role }
+// Lets us know who's actively viewing a conversation so we only push-notify
+// the side that isn't currently looking at it.
+const rooms = new Map();
+
+function roomKey(salonId, customerId) {
+  return `${salonId}:${customerId}`;
+}
+
+function joinRoom(salonId, customerId, ws, role) {
+  const key = roomKey(salonId, customerId);
+  if (!rooms.has(key)) rooms.set(key, new Set());
+  const entry = { ws, role };
+  rooms.get(key).add(entry);
+  return entry;
+}
+
+function leaveRoom(salonId, customerId, entry) {
+  const key = roomKey(salonId, customerId);
+  const set = rooms.get(key);
+  if (!set) return;
+  set.delete(entry);
+  if (set.size === 0) rooms.delete(key);
+}
+
+function hasRole(salonId, customerId, role) {
+  const set = rooms.get(roomKey(salonId, customerId));
+  if (!set) return false;
+  for (const entry of set) {
+    if (entry.role === role) return true;
+  }
+  return false;
+}
+
+function broadcast(salonId, customerId, payload) {
+  const set = rooms.get(roomKey(salonId, customerId));
+  if (!set) return;
+  const json = JSON.stringify(payload);
+  set.forEach(({ ws }) => {
+    if (ws.readyState === ws.OPEN) ws.send(json);
+  });
+}
+
+function sendMessage({ salonId, customerId, senderRole, body }) {
+  const message = {
+    id: uuidv4(),
+    salonId,
+    customerId,
+    senderRole,
+    body,
+    createdAt: new Date().toISOString(),
+    readByCustomer: senderRole === "customer" ? 1 : 0,
+    readByOwner: senderRole === "owner" ? 1 : 0,
+  };
+
+  db.prepare(
+    `INSERT INTO messages (id, salonId, customerId, senderRole, body, createdAt, readByCustomer, readByOwner)
+     VALUES (@id, @salonId, @customerId, @senderRole, @body, @createdAt, @readByCustomer, @readByOwner)`
+  ).run(message);
+
+  broadcast(salonId, customerId, { type: "message", message });
+
+  const recipientRole = senderRole === "customer" ? "owner" : "customer";
+  if (!hasRole(salonId, customerId, recipientRole)) {
+    const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(salonId);
+    if (recipientRole === "owner") {
+      if (salon?.ownerId) {
+        const customer = db.prepare("SELECT name FROM users WHERE id = ?").get(customerId);
+        notify(
+          salon.ownerId,
+          `New message from ${customer?.name || "a customer"}`,
+          body,
+          "new_message",
+          { salonId, customerId }
+        );
+      }
+    } else {
+      notify(customerId, `${salon?.name || "Salon"} sent you a message`, body, "new_message", {
+        salonId,
+        customerId,
+      });
+    }
+  }
+
+  return message;
+}
+
+function initChatServer(server) {
+  const { WebSocketServer } = require("ws");
+  const jwt = require("jsonwebtoken");
+  const { JWT_SECRET } = require("./authMiddleware");
+
+  const wss = new WebSocketServer({ server, path: "/ws/chat" });
+
+  wss.on("connection", (ws, req) => {
+    const url = new URL(req.url, "http://localhost");
+    const token = url.searchParams.get("token");
+    let userId, role;
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      userId = payload.userId;
+      role = payload.role;
+    } catch {
+      ws.close(4001, "Unauthorized");
+      return;
+    }
+
+    if (role !== "owner" && role !== "customer") {
+      ws.close(4003, "Chat is only available to customers and salon owners");
+      return;
+    }
+
+    let joined = null;
+
+    ws.on("message", (raw) => {
+      let msg;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+
+      if (msg.type === "join" && typeof msg.salonId === "string") {
+        let customerId;
+        if (role === "owner") {
+          const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(msg.salonId);
+          if (!salon || salon.ownerId !== userId || typeof msg.customerId !== "string") return;
+          customerId = msg.customerId;
+        } else {
+          customerId = userId;
+        }
+        if (joined) leaveRoom(joined.salonId, joined.customerId, joined.entry);
+        const entry = joinRoom(msg.salonId, customerId, ws, role);
+        joined = { salonId: msg.salonId, customerId, entry };
+        return;
+      }
+
+      if (msg.type === "message" && joined && typeof msg.body === "string" && msg.body.trim()) {
+        sendMessage({
+          salonId: joined.salonId,
+          customerId: joined.customerId,
+          senderRole: role,
+          body: msg.body.trim().slice(0, 2000),
+        });
+      }
+    });
+
+    ws.on("close", () => {
+      if (joined) leaveRoom(joined.salonId, joined.customerId, joined.entry);
+    });
+  });
+}
+
+module.exports = { initChatServer, sendMessage };

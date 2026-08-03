@@ -4,6 +4,7 @@ const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
 const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
+const { sendMessage } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 
 const router = express.Router();
@@ -913,6 +914,71 @@ router.get("/salons/:salonId/analytics", (req, res) => {
     perProfessional,
     topServices,
   });
+});
+
+// --- GET this salon's chat conversations (one per customer who has messaged) ---
+router.get("/salons/:salonId/conversations", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const conversations = db
+    .prepare(
+      `SELECT m.customerId, u.name as customerName,
+              (SELECT body FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessage,
+              (SELECT createdAt FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessageAt,
+              (SELECT COUNT(*) FROM messages m3 WHERE m3.salonId = m.salonId AND m3.customerId = m.customerId AND m3.senderRole = 'customer' AND m3.readByOwner = 0) as unreadCount
+       FROM messages m
+       INNER JOIN users u ON u.id = m.customerId
+       WHERE m.salonId = ?
+       GROUP BY m.customerId
+       ORDER BY lastMessageAt DESC`
+    )
+    .all(req.params.salonId);
+
+  res.json(conversations);
+});
+
+// --- GET the owner's chat thread with one customer ---
+router.get("/salons/:salonId/messages/:customerId", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const messages = db
+    .prepare(
+      `SELECT * FROM messages WHERE salonId = ? AND customerId = ? ORDER BY createdAt ASC`
+    )
+    .all(req.params.salonId, req.params.customerId);
+
+  db.prepare(
+    `UPDATE messages SET readByOwner = 1
+     WHERE salonId = ? AND customerId = ? AND senderRole = 'customer' AND readByOwner = 0`
+  ).run(req.params.salonId, req.params.customerId);
+
+  res.json(messages);
+});
+
+// --- POST send a chat message to a customer as the salon owner ---
+router.post("/salons/:salonId/messages/:customerId", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const body = (req.body.body || "").trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: "Message cannot be empty" });
+
+  const message = sendMessage({
+    salonId: req.params.salonId,
+    customerId: req.params.customerId,
+    senderRole: "owner",
+    body,
+  });
+
+  res.status(201).json(message);
 });
 
 // --- POST announce a message to all customers of a salon ---

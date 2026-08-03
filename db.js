@@ -648,4 +648,20 @@ if (!columnExists("bookings", "status")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN status TEXT`);
 }
 
+// --- Migration: chat between a customer and a salon ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    customerId TEXT NOT NULL,
+    senderRole TEXT NOT NULL,
+    body TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    readByCustomer INTEGER NOT NULL DEFAULT 0,
+    readByOwner INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    FOREIGN KEY (customerId) REFERENCES users(id)
+  );
+`);
+
 module.exports = db;
