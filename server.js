@@ -713,6 +713,43 @@ app.get("/salons/:salonId/my-loyalty-status", requireAuth, (req, res) => {
   });
 });
 
+// --- GET the logged-in customer's loyalty progress across every salon they've visited ---
+app.get("/my-loyalty", requireAuth, (req, res) => {
+  const salonIds = db
+    .prepare("SELECT DISTINCT salonId FROM bookings WHERE userId = ?")
+    .all(req.userId)
+    .map((r) => r.salonId);
+
+  const results = salonIds
+    .map((salonId) => {
+      const settings = db.prepare("SELECT * FROM loyalty_settings WHERE salonId = ?").get(salonId);
+      if (!settings || !settings.enabled) return null;
+
+      const salon = db.prepare("SELECT name FROM salons WHERE id = ?").get(salonId);
+      if (!salon) return null;
+
+      const { count } = db
+        .prepare("SELECT COUNT(*) as count FROM bookings WHERE salonId = ? AND userId = ?")
+        .get(salonId, req.userId);
+
+      const remainder = count % settings.visitsRequired;
+      const visitsUntilNextReward =
+        remainder === 0 ? settings.visitsRequired : settings.visitsRequired - remainder;
+
+      return {
+        salonId,
+        salonName: salon.name,
+        visitsRequired: settings.visitsRequired,
+        discountPercent: settings.discountPercent,
+        currentVisitCount: count,
+        visitsUntilNextReward,
+      };
+    })
+    .filter(Boolean);
+
+  res.json(results);
+});
+
 // --- GET /cron/reminders — send push reminders for bookings 1 hour from now ---
 // Call this every 5-10 minutes from an external cron (e.g. cron-job.org)
 app.get("/cron/reminders", async (req, res) => {
