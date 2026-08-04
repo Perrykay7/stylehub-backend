@@ -916,6 +916,34 @@ router.get("/salons/:salonId/analytics", (req, res) => {
   });
 });
 
+// --- GET every conversation across all of this owner's salons ---
+router.get("/conversations", (req, res) => {
+  const salons = db.prepare("SELECT id, name FROM salons WHERE ownerId = ?").all(req.userId);
+  if (salons.length === 0) return res.json([]);
+
+  pruneOldMessages();
+
+  const salonIds = salons.map((s) => s.id);
+  const placeholders = salonIds.map(() => "?").join(",");
+
+  const conversations = db
+    .prepare(
+      `SELECT m.salonId, s.name as salonName, m.customerId, u.name as customerName,
+              (SELECT body FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessage,
+              (SELECT createdAt FROM messages m2 WHERE m2.salonId = m.salonId AND m2.customerId = m.customerId ORDER BY m2.createdAt DESC LIMIT 1) as lastMessageAt,
+              (SELECT COUNT(*) FROM messages m3 WHERE m3.salonId = m.salonId AND m3.customerId = m.customerId AND m3.senderRole = 'customer' AND m3.readByOwner = 0) as unreadCount
+       FROM messages m
+       INNER JOIN users u ON u.id = m.customerId
+       INNER JOIN salons s ON s.id = m.salonId
+       WHERE m.salonId IN (${placeholders})
+       GROUP BY m.salonId, m.customerId
+       ORDER BY lastMessageAt DESC`
+    )
+    .all(...salonIds);
+
+  res.json(conversations);
+});
+
 // --- GET this salon's chat conversations (one per customer who has messaged) ---
 router.get("/salons/:salonId/conversations", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
