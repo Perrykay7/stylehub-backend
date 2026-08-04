@@ -2,6 +2,15 @@ const db = require("./db");
 const { v4: uuidv4 } = require("uuid");
 const { notify } = require("./notify");
 
+const MESSAGE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+// Messages older than 24h are deleted so chats stay ephemeral. Called
+// opportunistically on every read/write instead of a scheduled job.
+function pruneOldMessages() {
+  const cutoff = new Date(Date.now() - MESSAGE_LIFETIME_MS).toISOString();
+  db.prepare("DELETE FROM messages WHERE createdAt < ?").run(cutoff);
+}
+
 // In-memory room registry: `${salonId}:${customerId}` -> Set of { ws, role }
 // Lets us know who's actively viewing a conversation so we only push-notify
 // the side that isn't currently looking at it.
@@ -46,6 +55,8 @@ function broadcast(salonId, customerId, payload) {
 }
 
 function sendMessage({ salonId, customerId, senderRole, body }) {
+  pruneOldMessages();
+
   const message = {
     id: uuidv4(),
     salonId,
@@ -155,4 +166,4 @@ function initChatServer(server) {
   });
 }
 
-module.exports = { initChatServer, sendMessage };
+module.exports = { initChatServer, sendMessage, pruneOldMessages };

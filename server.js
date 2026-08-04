@@ -12,7 +12,7 @@ const ownerRoutes = require("./ownerRoutes");
 const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
-const { initChatServer, sendMessage } = require("./chat");
+const { initChatServer, sendMessage, pruneOldMessages } = require("./chat");
 const {
   generateTimeSlots,
   isProfessionalUnavailable,
@@ -198,6 +198,7 @@ app.get("/salons/:id", (req, res) => {
 
 // --- GET all of the logged-in customer's chat conversations, across every salon ---
 app.get("/my-conversations", requireAuth, (req, res) => {
+  pruneOldMessages();
   const conversations = db
     .prepare(
       `SELECT m.salonId, s.name as salonName,
@@ -219,6 +220,8 @@ app.get("/my-conversations", requireAuth, (req, res) => {
 app.get("/salons/:id/messages", requireAuth, (req, res) => {
   const salon = db.prepare("SELECT id FROM salons WHERE id = ?").get(req.params.id);
   if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  pruneOldMessages();
 
   const messages = db
     .prepare(

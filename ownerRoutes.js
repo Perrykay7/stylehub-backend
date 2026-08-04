@@ -4,7 +4,7 @@ const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
 const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
-const { sendMessage } = require("./chat");
+const { sendMessage, pruneOldMessages } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 
 const router = express.Router();
@@ -923,6 +923,8 @@ router.get("/salons/:salonId/conversations", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
+  pruneOldMessages();
+
   const conversations = db
     .prepare(
       `SELECT m.customerId, u.name as customerName,
@@ -946,6 +948,8 @@ router.get("/salons/:salonId/messages/:customerId", (req, res) => {
   if (!salon || salon.ownerId !== req.userId) {
     return res.status(404).json({ error: "Salon not found" });
   }
+
+  pruneOldMessages();
 
   const messages = db
     .prepare(
