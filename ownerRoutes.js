@@ -6,6 +6,7 @@ const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
 const { sendMessage, pruneOldMessages } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
+const { MAX_IMAGES_PER_PROFESSIONAL } = require("./professionalImages");
 
 const router = express.Router();
 
@@ -508,6 +509,53 @@ router.delete("/professionals/:id/unavailability/:blockId", (req, res) => {
 
   db.prepare("DELETE FROM professional_unavailability WHERE id = ? AND professionalId = ?").run(
     req.params.blockId,
+    req.params.id
+  );
+  res.json({ deleted: true });
+});
+
+// --- POST add a portfolio photo to a professional (max 3) ---
+router.post("/professionals/:id/images", (req, res) => {
+  const professional = getOwnedProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  const { imageUrl } = req.body;
+  if (!imageUrl) {
+    return res.status(400).json({ error: "imageUrl is required" });
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM professional_images WHERE professionalId = ?")
+    .all(req.params.id);
+  if (existing.length >= MAX_IMAGES_PER_PROFESSIONAL) {
+    return res.status(400).json({ error: `You can add up to ${MAX_IMAGES_PER_PROFESSIONAL} photos per professional` });
+  }
+
+  const image = {
+    id: uuidv4(),
+    professionalId: req.params.id,
+    imageUrl,
+    position: existing.length,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO professional_images (id, professionalId, imageUrl, position, createdAt) VALUES (@id, @professionalId, @imageUrl, @position, @createdAt)`
+  ).run(image);
+
+  res.status(201).json(image);
+});
+
+// --- DELETE a professional's portfolio photo ---
+router.delete("/professionals/:id/images/:imageId", (req, res) => {
+  const professional = getOwnedProfessional(req);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  db.prepare("DELETE FROM professional_images WHERE id = ? AND professionalId = ?").run(
+    req.params.imageId,
     req.params.id
   );
   res.json({ deleted: true });

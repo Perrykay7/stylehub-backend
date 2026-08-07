@@ -12,6 +12,7 @@ const ownerRoutes = require("./ownerRoutes");
 const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
+const { attachProfessionalImages } = require("./professionalImages");
 const { initChatServer, sendMessage, pruneOldMessages } = require("./chat");
 const {
   generateTimeSlots,
@@ -333,6 +334,43 @@ app.get("/salons/:id/professionals", (req, res) => {
   });
 
   res.json(withRatings);
+});
+
+// --- GET a single professional's public portfolio page ---
+app.get("/professionals/:id", (req, res) => {
+  const professional = db
+    .prepare("SELECT id, salonId, name, photoUrl, createdAt FROM professionals WHERE id = ?")
+    .get(req.params.id);
+  if (!professional) {
+    return res.status(404).json({ error: "Professional not found" });
+  }
+
+  const salon = db.prepare("SELECT id, name FROM salons WHERE id = ?").get(professional.salonId);
+
+  const stats = db
+    .prepare(
+      `SELECT AVG(rating) as avgRating, COUNT(*) as ratingCount
+       FROM professional_ratings WHERE professionalId = ?`
+    )
+    .get(professional.id);
+
+  const reviews = db
+    .prepare(
+      `SELECT rating, comment, createdAt FROM professional_ratings
+       WHERE professionalId = ? AND comment IS NOT NULL AND comment != ''
+       ORDER BY createdAt DESC`
+    )
+    .all(professional.id);
+
+  const [withImages] = attachProfessionalImages([professional]);
+
+  res.json({
+    ...withImages,
+    salonName: salon?.name || null,
+    avgRating: stats.avgRating ? Math.round(stats.avgRating * 10) / 10 : null,
+    ratingCount: stats.ratingCount,
+    reviews,
+  });
 });
 
 // --- GET already-booked time slots for a salon on a specific date ---
