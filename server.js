@@ -13,7 +13,7 @@ const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
 const { attachProfessionalImages } = require("./professionalImages");
-const { initChatServer, sendMessage, pruneOldMessages } = require("./chat");
+const { initChatServer, sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const {
   generateTimeSlots,
   isProfessionalUnavailable,
@@ -254,6 +254,25 @@ app.post("/salons/:id/messages", requireAuth, (req, res) => {
   });
 
   res.status(201).json(message);
+});
+
+// --- PATCH edit one of the logged-in customer's own chat messages ---
+app.patch("/messages/:id", requireAuth, (req, res) => {
+  const body = (req.body.body || "").trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: "Message cannot be empty" });
+
+  const updated = editMessage(req.params.id, req.userId, "customer", body);
+  if (!updated) return res.status(404).json({ error: "Message not found" });
+
+  res.json(updated);
+});
+
+// --- DELETE one of the logged-in customer's own chat messages ---
+app.delete("/messages/:id", requireAuth, (req, res) => {
+  const deleted = deleteMessage(req.params.id, req.userId, "customer");
+  if (!deleted) return res.status(404).json({ error: "Message not found" });
+
+  res.json({ deleted: true });
 });
 
 // --- POST a review for a salon (requires auth, one per user per salon, must have booked) ---

@@ -4,7 +4,7 @@ const db = require("./db");
 const { requireAuth, requireOwner } = require("./authMiddleware");
 const { notify } = require("./notify");
 const { autoAssignStaleBookings } = require("./bookingAssignment");
-const { sendMessage, pruneOldMessages } = require("./chat");
+const { sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 const { MAX_IMAGES_PER_PROFESSIONAL } = require("./professionalImages");
 
@@ -1059,6 +1059,25 @@ router.post("/salons/:salonId/messages/:customerId", (req, res) => {
   });
 
   res.status(201).json(message);
+});
+
+// --- PATCH edit one of the owner's own chat messages ---
+router.patch("/messages/:id", (req, res) => {
+  const body = (req.body.body || "").trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: "Message cannot be empty" });
+
+  const updated = editMessage(req.params.id, req.userId, "owner", body);
+  if (!updated) return res.status(404).json({ error: "Message not found" });
+
+  res.json(updated);
+});
+
+// --- DELETE one of the owner's own chat messages ---
+router.delete("/messages/:id", (req, res) => {
+  const deleted = deleteMessage(req.params.id, req.userId, "owner");
+  if (!deleted) return res.status(404).json({ error: "Message not found" });
+
+  res.json({ deleted: true });
 });
 
 // --- POST announce a message to all customers of a salon ---

@@ -676,4 +676,8 @@ db.exec(`
   );
 `);
 
+if (!columnExists("messages", "edited")) {
+  db.exec(`ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0`);
+}
+
 module.exports = db;

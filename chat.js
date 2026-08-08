@@ -100,6 +100,47 @@ function sendMessage({ salonId, customerId, senderRole, body }) {
   return message;
 }
 
+// Looks up a message and confirms the requester actually sent it, so only
+// the original sender can edit/delete it.
+function getOwnMessage(messageId, requesterId, requesterRole) {
+  const message = db.prepare("SELECT * FROM messages WHERE id = ?").get(messageId);
+  if (!message) return null;
+  if (message.senderRole !== requesterRole) return null;
+
+  if (requesterRole === "customer") {
+    if (message.customerId !== requesterId) return null;
+  } else {
+    const salon = db.prepare("SELECT ownerId FROM salons WHERE id = ?").get(message.salonId);
+    if (!salon || salon.ownerId !== requesterId) return null;
+  }
+
+  return message;
+}
+
+function editMessage(messageId, requesterId, requesterRole, newBody) {
+  const message = getOwnMessage(messageId, requesterId, requesterRole);
+  if (!message) return null;
+
+  db.prepare("UPDATE messages SET body = ?, edited = 1 WHERE id = ?").run(newBody, messageId);
+  const updated = { ...message, body: newBody, edited: 1 };
+  broadcast(message.salonId, message.customerId, { type: "message_edited", message: updated });
+  return updated;
+}
+
+function deleteMessage(messageId, requesterId, requesterRole) {
+  const message = getOwnMessage(messageId, requesterId, requesterRole);
+  if (!message) return null;
+
+  db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+  broadcast(message.salonId, message.customerId, {
+    type: "message_deleted",
+    messageId,
+    salonId: message.salonId,
+    customerId: message.customerId,
+  });
+  return message;
+}
+
 function initChatServer(server) {
   const { WebSocketServer } = require("ws");
   const jwt = require("jsonwebtoken");
@@ -158,6 +199,14 @@ function initChatServer(server) {
           body: msg.body.trim().slice(0, 2000),
         });
       }
+
+      if (msg.type === "edit_message" && typeof msg.messageId === "string" && typeof msg.body === "string" && msg.body.trim()) {
+        editMessage(msg.messageId, userId, role, msg.body.trim().slice(0, 2000));
+      }
+
+      if (msg.type === "delete_message" && typeof msg.messageId === "string") {
+        deleteMessage(msg.messageId, userId, role);
+      }
     });
 
     ws.on("close", () => {
@@ -166,4 +215,4 @@ function initChatServer(server) {
   });
 }
 
-module.exports = { initChatServer, sendMessage, pruneOldMessages };
+module.exports = { initChatServer, sendMessage, editMessage, deleteMessage, pruneOldMessages };
