@@ -114,6 +114,23 @@ router.put("/salons/:id", (req, res) => {
   res.json({ ...salon, name, category, address, openTime, closeTime, imageUrl });
 });
 
+// --- PUT this salon's customer service contact (shown to customers on the salon page) ---
+router.put("/salons/:id/customer-service", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.id);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const phone = (req.body.customerServicePhone || "").trim() || null;
+  const email = (req.body.customerServiceEmail || "").trim() || null;
+
+  db.prepare(
+    `UPDATE salons SET customerServicePhone = ?, customerServiceEmail = ? WHERE id = ?`
+  ).run(phone, email, salon.id);
+
+  res.json({ customerServicePhone: phone, customerServiceEmail: email });
+});
+
 // --- POST add a service to one of this owner's salons ---
 router.post("/salons/:salonId/services", (req, res) => {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);

@@ -680,4 +680,12 @@ if (!columnExists("messages", "edited")) {
   db.exec(`ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0`);
 }
 
+// --- Migration: per-salon customer service contact (owner-editable) ---
+if (!columnExists("salons", "customerServicePhone")) {
+  db.exec(`ALTER TABLE salons ADD COLUMN customerServicePhone TEXT`);
+}
+if (!columnExists("salons", "customerServiceEmail")) {
+  db.exec(`ALTER TABLE salons ADD COLUMN customerServiceEmail TEXT`);
+}
+
 module.exports = db;
