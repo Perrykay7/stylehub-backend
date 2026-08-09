@@ -7,6 +7,7 @@ const { autoAssignStaleBookings } = require("./bookingAssignment");
 const { sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 const { MAX_IMAGES_PER_PROFESSIONAL } = require("./professionalImages");
+const { attachCustomerServiceContacts, MAX_CONTACTS_PER_SALON } = require("./salonContacts");
 
 const router = express.Router();
 
@@ -19,7 +20,9 @@ router.get("/salons", (req, res) => {
     .prepare("SELECT * FROM salons WHERE ownerId = ?")
     .all(req.userId);
 
-  const fullSalons = salons.map((salon) => {
+  const withContacts = attachCustomerServiceContacts(salons);
+
+  const fullSalons = withContacts.map((salon) => {
     const services = attachImages(
       db.prepare("SELECT * FROM services WHERE salonId = ?").all(salon.id)
     );
@@ -114,21 +117,91 @@ router.put("/salons/:id", (req, res) => {
   res.json({ ...salon, name, category, address, openTime, closeTime, imageUrl });
 });
 
-// --- PUT this salon's customer service contact (shown to customers on the salon page) ---
-router.put("/salons/:id/customer-service", (req, res) => {
+function getOwnedSalon(req) {
   const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.id);
-  if (!salon || salon.ownerId !== req.userId) {
-    return res.status(404).json({ error: "Salon not found" });
+  if (!salon || salon.ownerId !== req.userId) return null;
+  return salon;
+}
+
+// --- GET this salon's customer service contacts ---
+router.get("/salons/:id/customer-service", (req, res) => {
+  const salon = getOwnedSalon(req);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const [withContacts] = attachCustomerServiceContacts([salon]);
+  res.json(withContacts.customerServiceContacts);
+});
+
+// --- POST add a customer service contact to this salon (max 5) ---
+router.post("/salons/:id/customer-service", (req, res) => {
+  const salon = getOwnedSalon(req);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const label = (req.body.label || "").trim() || null;
+  const phone = (req.body.phone || "").trim() || null;
+  const email = (req.body.email || "").trim() || null;
+  if (!phone && !email) {
+    return res.status(400).json({ error: "Enter a phone number or email for this contact" });
   }
 
-  const phone = (req.body.customerServicePhone || "").trim() || null;
-  const email = (req.body.customerServiceEmail || "").trim() || null;
+  const existing = db
+    .prepare("SELECT id FROM salon_customer_service_contacts WHERE salonId = ?")
+    .all(req.params.id);
+  if (existing.length >= MAX_CONTACTS_PER_SALON) {
+    return res.status(400).json({ error: `You can add up to ${MAX_CONTACTS_PER_SALON} contacts per salon` });
+  }
+
+  const contact = {
+    id: uuidv4(),
+    salonId: req.params.id,
+    label,
+    phone,
+    email,
+    position: existing.length,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO salon_customer_service_contacts (id, salonId, label, phone, email, position, createdAt)
+     VALUES (@id, @salonId, @label, @phone, @email, @position, @createdAt)`
+  ).run(contact);
+
+  res.status(201).json({ id: contact.id, label: contact.label, phone: contact.phone, email: contact.email });
+});
+
+// --- PUT edit a customer service contact ---
+router.put("/salons/:id/customer-service/:contactId", (req, res) => {
+  const salon = getOwnedSalon(req);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  const contact = db
+    .prepare("SELECT * FROM salon_customer_service_contacts WHERE id = ? AND salonId = ?")
+    .get(req.params.contactId, req.params.id);
+  if (!contact) return res.status(404).json({ error: "Contact not found" });
+
+  const label = (req.body.label || "").trim() || null;
+  const phone = (req.body.phone || "").trim() || null;
+  const email = (req.body.email || "").trim() || null;
+  if (!phone && !email) {
+    return res.status(400).json({ error: "Enter a phone number or email for this contact" });
+  }
 
   db.prepare(
-    `UPDATE salons SET customerServicePhone = ?, customerServiceEmail = ? WHERE id = ?`
-  ).run(phone, email, salon.id);
+    `UPDATE salon_customer_service_contacts SET label = ?, phone = ?, email = ? WHERE id = ?`
+  ).run(label, phone, email, contact.id);
 
-  res.json({ customerServicePhone: phone, customerServiceEmail: email });
+  res.json({ id: contact.id, label, phone, email });
+});
+
+// --- DELETE a customer service contact ---
+router.delete("/salons/:id/customer-service/:contactId", (req, res) => {
+  const salon = getOwnedSalon(req);
+  if (!salon) return res.status(404).json({ error: "Salon not found" });
+
+  db.prepare("DELETE FROM salon_customer_service_contacts WHERE id = ? AND salonId = ?").run(
+    req.params.contactId,
+    req.params.id
+  );
+  res.json({ deleted: true });
 });
 
 // --- POST add a service to one of this owner's salons ---

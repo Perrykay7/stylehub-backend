@@ -13,6 +13,7 @@ const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
 const { attachProfessionalImages } = require("./professionalImages");
+const { attachCustomerServiceContacts } = require("./salonContacts");
 const { initChatServer, sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const {
   generateTimeSlots,
@@ -194,7 +195,9 @@ app.get("/salons/:id", (req, res) => {
           (reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount) * 10
         ) / 10;
 
-  res.json({ ...salon, rating, reviewCount, services, reviews });
+  const [withContacts] = attachCustomerServiceContacts([salon]);
+
+  res.json({ ...withContacts, rating, reviewCount, services, reviews });
 });
 
 // --- GET all of the logged-in customer's chat conversations, across every salon ---

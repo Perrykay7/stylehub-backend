@@ -681,11 +681,28 @@ if (!columnExists("messages", "edited")) {
 }
 
 // --- Migration: per-salon customer service contact (owner-editable) ---
+// Superseded by the salon_customer_service_contacts table below (a salon can
+// have multiple contacts), but left in place since these columns may still
+// hold data from the earlier single-contact version.
 if (!columnExists("salons", "customerServicePhone")) {
   db.exec(`ALTER TABLE salons ADD COLUMN customerServicePhone TEXT`);
 }
 if (!columnExists("salons", "customerServiceEmail")) {
   db.exec(`ALTER TABLE salons ADD COLUMN customerServiceEmail TEXT`);
 }
+
+// --- Migration: multiple customer service contacts per salon ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS salon_customer_service_contacts (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    label TEXT,
+    phone TEXT,
+    email TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+`);
 
 module.exports = db;
