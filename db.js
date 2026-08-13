@@ -705,4 +705,9 @@ db.exec(`
   );
 `);
 
+// --- Migration: optional email on signup ---
+if (!columnExists("users", "email")) {
+  db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
+}
+
 module.exports = db;

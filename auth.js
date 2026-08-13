@@ -24,10 +24,15 @@ function getCurrentProfessionalInviteCode() {
 
 // --- POST /auth/register ---
 router.post("/register", async (req, res) => {
-  const { name, phone, password, role, inviteCode, claimCode } = req.body;
+  const { name, phone, password, role, inviteCode, claimCode, email } = req.body;
 
   if (!name || !phone || !password) {
     return res.status(400).json({ error: "Name, phone, and password are required" });
+  }
+
+  const trimmedEmail = (email || "").trim();
+  if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+    return res.status(400).json({ error: "Please enter a valid email address" });
   }
 
   const wantsOwner = role === "owner";
@@ -80,6 +85,7 @@ router.post("/register", async (req, res) => {
     id: uuidv4(),
     name,
     phone,
+    email: trimmedEmail || null,
     passwordHash,
     role: finalRole,
     ownerCode: wantsOwner ? getCurrentInviteCode() : null,
@@ -88,8 +94,8 @@ router.post("/register", async (req, res) => {
   };
 
   db.prepare(
-    `INSERT INTO users (id, name, phone, passwordHash, role, ownerCode, professionalCode, createdAt)
-     VALUES (@id, @name, @phone, @passwordHash, @role, @ownerCode, @professionalCode, @createdAt)`
+    `INSERT INTO users (id, name, phone, email, passwordHash, role, ownerCode, professionalCode, createdAt)
+     VALUES (@id, @name, @phone, @email, @passwordHash, @role, @ownerCode, @professionalCode, @createdAt)`
   ).run(user);
 
   if (claimedProfessional) {
@@ -107,7 +113,7 @@ router.post("/register", async (req, res) => {
 
   res.status(201).json({
     token,
-    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+    user: { id: user.id, name: user.name, phone: user.phone, email: user.email, role: user.role },
   });
 });
 
@@ -137,7 +143,7 @@ router.post("/login", async (req, res) => {
 
   res.json({
     token,
-    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+    user: { id: user.id, name: user.name, phone: user.phone, email: user.email, role: user.role },
   });
 });
 
@@ -358,7 +364,7 @@ router.post("/reverify", requireAuth, (req, res) => {
 
   res.json({
     token,
-    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+    user: { id: user.id, name: user.name, phone: user.phone, email: user.email, role: user.role },
   });
 });
 
@@ -400,7 +406,7 @@ router.put("/profile", requireAuth, async (req, res) => {
 
   res.json({
     token,
-    user: { id: req.userId, name: updatedName, phone: updatedPhone, role: user.role },
+    user: { id: req.userId, name: updatedName, phone: updatedPhone, email: user.email, role: user.role },
   });
 });
 
