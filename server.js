@@ -625,6 +625,133 @@ app.post("/bookings", requireAuth, (req, res) => {
 
   res.status(201).json(booking);
 });
+
+// --- PATCH reschedule a booking to a new date/time (only if it belongs to this user) ---
+app.patch("/bookings/:id/reschedule", requireAuth, (req, res) => {
+  const { date, dateLabel, time, professionalId } = req.body;
+
+  if (!date || !dateLabel || !time) {
+    return res.status(400).json({ error: "Missing required reschedule fields" });
+  }
+
+  const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(req.params.id);
+  if (!booking || booking.userId !== req.userId) {
+    return res.status(404).json({ error: "Booking not found" });
+  }
+
+  const currentAppointmentDateTime = new Date(`${booking.date}T${booking.time}:00`);
+  const hoursUntilCurrentAppointment = (currentAppointmentDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+  if (hoursUntilCurrentAppointment < 2) {
+    return res.status(400).json({
+      error: "Bookings can only be rescheduled at least 2 hours before the appointment time.",
+    });
+  }
+
+  const newAppointmentDateTime = new Date(`${date}T${time}:00`);
+  if (newAppointmentDateTime.getTime() - Date.now() < 2 * 60 * 60 * 1000) {
+    return res.status(400).json({
+      error: "Please pick a new time at least 2 hours from now.",
+    });
+  }
+
+  const qualifiedProfessionals = db
+    .prepare(
+      `SELECT p.id FROM professionals p
+       INNER JOIN professional_services ps ON ps.professionalId = p.id
+       WHERE p.salonId = ? AND ps.serviceId = ?`
+    )
+    .all(booking.salonId, booking.serviceId);
+
+  let finalProfessionalId = professionalId || null;
+  let noPreference = false;
+  let professionalsToNotify = [];
+
+  if (qualifiedProfessionals.length === 0) {
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE salonId = ? AND date = ? AND time = ? AND id != ?")
+      .get(booking.salonId, date, time, booking.id);
+    if (conflict) {
+      return res.status(409).json({ error: "That time slot is already booked. Please pick another." });
+    }
+  } else if (finalProfessionalId) {
+    const conflict = db
+      .prepare("SELECT id FROM bookings WHERE professionalId = ? AND date = ? AND time = ? AND id != ?")
+      .get(finalProfessionalId, date, time, booking.id);
+    if (conflict || isProfessionalUnavailable(finalProfessionalId, date, time)) {
+      return res.status(409).json({ error: "That professional is not available at this time. Please choose another." });
+    }
+  } else {
+    const available = findFreeQualifiedProfessionals(booking.salonId, booking.serviceId, date, time, booking.id);
+    if (available.length === 0) {
+      return res.status(409).json({ error: "That time slot is fully booked. Please pick another." });
+    }
+    noPreference = true;
+    professionalsToNotify = available.map((p) => p.id);
+  }
+
+  const oldDate = booking.date;
+  const oldTime = booking.time;
+  const oldProfessionalId = booking.professionalId;
+
+  db.prepare(
+    "UPDATE bookings SET date = ?, dateLabel = ?, time = ?, professionalId = ?, noPreference = ? WHERE id = ?"
+  ).run(date, dateLabel, time, finalProfessionalId, noPreference ? 1 : 0, booking.id);
+
+  const updatedBooking = db
+    .prepare(
+      `SELECT b.*, p.name AS professionalName
+       FROM bookings b
+       LEFT JOIN professionals p ON b.professionalId = p.id
+       WHERE b.id = ?`
+    )
+    .get(booking.id);
+
+  notify(
+    req.userId,
+    "Booking Rescheduled 🔄",
+    `${booking.salonName} · ${booking.serviceName} moved to ${dateLabel} at ${time}`,
+    "booking_rescheduled",
+    { bookingId: booking.id }
+  );
+
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(booking.salonId);
+  if (salon?.ownerId) {
+    const customer = db.prepare("SELECT name FROM users WHERE id = ?").get(req.userId);
+    notify(
+      salon.ownerId,
+      "Booking Rescheduled 🔄",
+      `${customer?.name || "A customer"} moved ${booking.serviceName} to ${dateLabel} at ${time}`,
+      "booking_rescheduled",
+      { bookingId: booking.id }
+    );
+  }
+
+  if (noPreference && professionalsToNotify.length > 0) {
+    const placeholders = professionalsToNotify.map(() => "?").join(",");
+    const proUsers = db
+      .prepare(
+        `SELECT u.id AS userId FROM professionals p
+         INNER JOIN users u ON u.id = p.userId
+         WHERE p.id IN (${placeholders})`
+      )
+      .all(...professionalsToNotify);
+    proUsers.forEach((u) => {
+      notify(
+        u.userId,
+        "New booking available 💈",
+        `${booking.serviceName} on ${dateLabel} at ${time} — tap to accept it`,
+        "new_open_job",
+        { bookingId: booking.id }
+      );
+    });
+  }
+
+  // The old slot is now free — notify anyone waiting for it.
+  checkWaitlistOnFreedSlot(booking.salonId, booking.serviceId, oldDate, oldTime, oldProfessionalId);
+
+  res.json(updatedBooking);
+});
+
 // --- DELETE cancel a booking (only if it belongs to this user) ---
 app.delete("/bookings/:id", requireAuth, (req, res) => {
   const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(req.params.id);
