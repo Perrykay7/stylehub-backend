@@ -710,4 +710,9 @@ if (!columnExists("users", "email")) {
   db.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
 }
 
+// --- Migration: optional tip for a specifically-selected professional ---
+if (!columnExists("bookings", "tipAmount")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN tipAmount REAL NOT NULL DEFAULT 0`);
+}
+
 module.exports = db;

@@ -493,11 +493,15 @@ const { checkWaitlistOnFreedSlot } = require("./waitlist");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
-  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId } =
+  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId, tipAmount } =
     req.body;
 
   if (!salonId || !serviceId || !date || !dateLabel || !time) {
     return res.status(400).json({ error: "Missing required booking fields" });
+  }
+
+  if (tipAmount !== undefined && (typeof tipAmount !== "number" || !Number.isFinite(tipAmount) || tipAmount < 0)) {
+    return res.status(400).json({ error: "Invalid tip amount" });
   }
 
   // Get professionals who can perform this service
@@ -570,7 +574,11 @@ app.post("/bookings", requireAuth, (req, res) => {
     }
   }
 
- const booking = {
+ // Tips only make sense when the customer picked a specific professional —
+  // there's nobody to credit it to for a "no preference" or unstaffed booking.
+  const finalTipAmount = finalProfessionalId && tipAmount ? Math.round(tipAmount * 100) / 100 : 0;
+
+  const booking = {
     id: uuidv4(),
     userId: req.userId,
     salonId,
@@ -586,11 +594,12 @@ app.post("/bookings", requireAuth, (req, res) => {
     createdAt: new Date().toISOString(),
     professionalId: finalProfessionalId,
     noPreference: noPreference ? 1 : 0,
+    tipAmount: finalTipAmount,
   };
 
   db.prepare(
-    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, noPreference)
-     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference)`
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, noPreference, tipAmount)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference, @tipAmount)`
   ).run(booking);
 
   notify(
@@ -600,6 +609,25 @@ app.post("/bookings", requireAuth, (req, res) => {
     "booking_confirmed",
     { bookingId: booking.id }
   );
+
+  if (finalTipAmount > 0) {
+    const proUser = db
+      .prepare(
+        `SELECT u.id AS userId FROM professionals p
+         INNER JOIN users u ON u.id = p.userId
+         WHERE p.id = ?`
+      )
+      .get(finalProfessionalId);
+    if (proUser?.userId) {
+      notify(
+        proUser.userId,
+        "You got tipped! 💸",
+        `A customer left you a GHS ${finalTipAmount} tip for ${serviceName} on ${dateLabel} at ${time}`,
+        "tip_received",
+        { bookingId: booking.id }
+      );
+    }
+  }
 
   checkLoyaltyMilestone(salonId, req.userId, salonName);
 
