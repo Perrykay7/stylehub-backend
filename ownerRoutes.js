@@ -1024,6 +1024,7 @@ router.get("/salons/:salonId/analytics", (req, res) => {
       `SELECT p.id as professionalId, p.name,
               COUNT(b.id) as bookingCount,
               COALESCE(SUM(b.price), 0) as revenue,
+              COALESCE(SUM(b.tipAmount), 0) as tips,
               (SELECT COALESCE(AVG(rating), 0) FROM professional_ratings WHERE professionalId = p.id) as avgRating
        FROM professionals p
        LEFT JOIN bookings b ON b.professionalId = p.id AND b.date >= ?
@@ -1033,6 +1034,10 @@ router.get("/salons/:salonId/analytics", (req, res) => {
     )
     .all(sinceIso, salonId)
     .map((p) => ({ ...p, avgRating: Math.round(p.avgRating * 10) / 10 }));
+
+  const totalTips = db
+    .prepare(`SELECT COALESCE(SUM(tipAmount), 0) as total FROM bookings WHERE salonId = ? AND date >= ?`)
+    .get(salonId, sinceIso).total;
 
   const topServices = db
     .prepare(
@@ -1051,6 +1056,7 @@ router.get("/salons/:salonId/analytics", (req, res) => {
     noShowCount,
     perProfessional,
     topServices,
+    totalTips,
   });
 });
 
