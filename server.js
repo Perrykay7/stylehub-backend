@@ -13,6 +13,7 @@ const professionalRoutes = require("./professionalRoutes");
 const { requireAuth } = require("./authMiddleware");
 const { attachImages } = require("./serviceImages");
 const { attachProfessionalImages } = require("./professionalImages");
+const { attachSalonImages } = require("./salonImages");
 const { attachCustomerServiceContacts } = require("./salonContacts");
 const { initChatServer, sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const {
@@ -196,8 +197,9 @@ app.get("/salons/:id", (req, res) => {
         ) / 10;
 
   const [withContacts] = attachCustomerServiceContacts([salon]);
+  const [withImages] = attachSalonImages([withContacts]);
 
-  res.json({ ...withContacts, rating, reviewCount, services, reviews });
+  res.json({ ...withImages, rating, reviewCount, services, reviews });
 });
 
 // --- GET all of the logged-in customer's chat conversations, across every salon ---
@@ -487,13 +489,13 @@ app.post("/users/push-token", requireAuth, (req, res) => {
 
 const { notify } = require("./notify");
 const { autoAssignStaleBookings, findFreeQualifiedProfessionals } = require("./bookingAssignment");
-const { generateCancellationReminders } = require("./reminders");
+const { generateCancellationReminders, generateReviewReminders } = require("./reminders");
 const { checkLoyaltyMilestone } = require("./loyalty");
 const { checkWaitlistOnFreedSlot } = require("./waitlist");
 
 // --- POST create a booking (requires auth, checks for conflicts) ---
 app.post("/bookings", requireAuth, (req, res) => {
-  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId, tipAmount } =
+  const { salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, promoCode, professionalId, tipAmount, notes } =
     req.body;
 
   if (!salonId || !serviceId || !date || !dateLabel || !time) {
@@ -503,6 +505,8 @@ app.post("/bookings", requireAuth, (req, res) => {
   if (tipAmount !== undefined && (typeof tipAmount !== "number" || !Number.isFinite(tipAmount) || tipAmount < 0)) {
     return res.status(400).json({ error: "Invalid tip amount" });
   }
+
+  const trimmedNotes = typeof notes === "string" ? notes.trim().slice(0, 300) : "";
 
   // Get professionals who can perform this service
   const qualifiedProfessionals = db
@@ -595,11 +599,12 @@ app.post("/bookings", requireAuth, (req, res) => {
     professionalId: finalProfessionalId,
     noPreference: noPreference ? 1 : 0,
     tipAmount: finalTipAmount,
+    notes: trimmedNotes || null,
   };
 
   db.prepare(
-    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, noPreference, tipAmount)
-     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference, @tipAmount)`
+    `INSERT INTO bookings (id, userId, salonId, serviceId, salonName, serviceName, date, dateLabel, time, price, originalPrice, discountAmount, createdAt, professionalId, noPreference, tipAmount, notes)
+     VALUES (@id, @userId, @salonId, @serviceId, @salonName, @serviceName, @date, @dateLabel, @time, @price, @originalPrice, @discountAmount, @createdAt, @professionalId, @noPreference, @tipAmount, @notes)`
   ).run(booking);
 
   notify(
@@ -897,6 +902,7 @@ app.delete("/waitlist/:id", requireAuth, (req, res) => {
 app.get("/bookings", requireAuth, (req, res) => {
   autoAssignStaleBookings();
   generateCancellationReminders();
+  generateReviewReminders();
   const bookings = db
     .prepare(
       `SELECT b.*, p.name AS professionalName,
@@ -1115,6 +1121,7 @@ app.get("/cron/reminders", async (req, res) => {
   }
   autoAssignStaleBookings();
   generateCancellationReminders();
+  generateReviewReminders();
 
   const now = new Date();
   const targetMin = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
@@ -1145,6 +1152,7 @@ app.get("/cron/reminders", async (req, res) => {
 // --- GET the logged-in user's notification history ---
 app.get("/notifications", requireAuth, (req, res) => {
   generateCancellationReminders();
+  generateReviewReminders();
   const notifications = db
     .prepare("SELECT * FROM notifications WHERE userId = ? ORDER BY createdAt DESC LIMIT 100")
     .all(req.userId)

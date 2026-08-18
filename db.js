@@ -715,4 +715,26 @@ if (!columnExists("bookings", "tipAmount")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN tipAmount REAL NOT NULL DEFAULT 0`);
 }
 
+// --- Migration: salon photo gallery (owners can add up to 6 photos per salon) ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS salon_images (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    imageUrl TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id)
+  );
+`);
+
+// --- Migration: optional customer notes/special requests on a booking ---
+if (!columnExists("bookings", "notes")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN notes TEXT`);
+}
+
+// --- Migration: track whether a post-visit review reminder was already sent ---
+if (!columnExists("bookings", "reviewReminderSent")) {
+  db.exec(`ALTER TABLE bookings ADD COLUMN reviewReminderSent INTEGER NOT NULL DEFAULT 0`);
+}
+
 module.exports = db;

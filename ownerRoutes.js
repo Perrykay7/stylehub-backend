@@ -7,6 +7,7 @@ const { autoAssignStaleBookings } = require("./bookingAssignment");
 const { sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const { attachImages, MAX_IMAGES_PER_SERVICE } = require("./serviceImages");
 const { MAX_IMAGES_PER_PROFESSIONAL } = require("./professionalImages");
+const { attachSalonImages, MAX_IMAGES_PER_SALON } = require("./salonImages");
 const { attachCustomerServiceContacts, MAX_CONTACTS_PER_SALON } = require("./salonContacts");
 
 const router = express.Router();
@@ -21,8 +22,9 @@ router.get("/salons", (req, res) => {
     .all(req.userId);
 
   const withContacts = attachCustomerServiceContacts(salons);
+  const withImages = attachSalonImages(withContacts);
 
-  const fullSalons = withContacts.map((salon) => {
+  const fullSalons = withImages.map((salon) => {
     const services = attachImages(
       db.prepare("SELECT * FROM services WHERE salonId = ?").all(salon.id)
     );
@@ -645,6 +647,53 @@ router.delete("/professionals/:id/images/:imageId", (req, res) => {
   }
 
   db.prepare("DELETE FROM professional_images WHERE id = ? AND professionalId = ?").run(
+    req.params.imageId,
+    req.params.id
+  );
+  res.json({ deleted: true });
+});
+
+// --- POST add a photo to a salon's gallery (max 6) ---
+router.post("/salons/:id/images", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.id);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const { imageUrl } = req.body;
+  if (!imageUrl) {
+    return res.status(400).json({ error: "imageUrl is required" });
+  }
+
+  const existing = db
+    .prepare("SELECT id FROM salon_images WHERE salonId = ?")
+    .all(req.params.id);
+  if (existing.length >= MAX_IMAGES_PER_SALON) {
+    return res.status(400).json({ error: `You can add up to ${MAX_IMAGES_PER_SALON} photos per salon` });
+  }
+
+  const image = {
+    id: uuidv4(),
+    salonId: req.params.id,
+    imageUrl,
+    position: existing.length,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO salon_images (id, salonId, imageUrl, position, createdAt) VALUES (@id, @salonId, @imageUrl, @position, @createdAt)`
+  ).run(image);
+
+  res.status(201).json(image);
+});
+
+// --- DELETE a salon's gallery photo ---
+router.delete("/salons/:id/images/:imageId", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.id);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  db.prepare("DELETE FROM salon_images WHERE id = ? AND salonId = ?").run(
     req.params.imageId,
     req.params.id
   );
