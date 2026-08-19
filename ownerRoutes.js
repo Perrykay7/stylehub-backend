@@ -38,7 +38,7 @@ router.get("/salons", (req, res) => {
 router.post("/salons", (req, res) => {
   const { name, category, address, openTime, closeTime, imageUrl } = req.body;
 
-  if (!name || !category || !address || !openTime || !closeTime) {
+  if (!name || !category || !openTime || !closeTime) {
     return res.status(400).json({ error: "Missing required salon fields" });
   }
 
@@ -47,7 +47,10 @@ router.post("/salons", (req, res) => {
     ownerId: req.userId,
     name,
     category,
-    address,
+    // The address column is NOT NULL at the schema level (pre-existing),
+    // so an empty string represents "no address" instead of null — every
+    // consumer already treats both as falsy.
+    address: address || "",
     distanceKm: 0,
     rating: 0,
     reviewCount: 0,
@@ -102,10 +105,13 @@ router.put("/salons/:id", (req, res) => {
     return res.status(404).json({ error: "Salon not found" });
   }
 
-  const { name, category, address, openTime, closeTime, imageUrl } = req.body;
+  const { name, category, address, openTime, closeTime, imageUrl, latitude, longitude, clearLocation } = req.body;
+
+  const finalLatitude = clearLocation ? null : latitude ?? salon.latitude;
+  const finalLongitude = clearLocation ? null : longitude ?? salon.longitude;
 
   db.prepare(
-    `UPDATE salons SET name = ?, category = ?, address = ?, openTime = ?, closeTime = ?, imageUrl = ? WHERE id = ?`
+    `UPDATE salons SET name = ?, category = ?, address = ?, openTime = ?, closeTime = ?, imageUrl = ?, latitude = ?, longitude = ? WHERE id = ?`
   ).run(
     name ?? salon.name,
     category ?? salon.category,
@@ -113,10 +119,22 @@ router.put("/salons/:id", (req, res) => {
     openTime ?? salon.openTime,
     closeTime ?? salon.closeTime,
     imageUrl ?? salon.imageUrl,
+    finalLatitude,
+    finalLongitude,
     salon.id
   );
 
-  res.json({ ...salon, name, category, address, openTime, closeTime, imageUrl });
+  res.json({
+    ...salon,
+    name,
+    category,
+    address,
+    openTime,
+    closeTime,
+    imageUrl,
+    latitude: finalLatitude,
+    longitude: finalLongitude,
+  });
 });
 
 function getOwnedSalon(req) {

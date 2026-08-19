@@ -751,4 +751,13 @@ db.exec(`
   );
 `);
 
+// --- Migration: exact salon location (owner-captured GPS coordinates),
+// separate from and independent of the free-text address ---
+if (!columnExists("salons", "latitude")) {
+  db.exec(`ALTER TABLE salons ADD COLUMN latitude REAL`);
+}
+if (!columnExists("salons", "longitude")) {
+  db.exec(`ALTER TABLE salons ADD COLUMN longitude REAL`);
+}
+
 module.exports = db;
