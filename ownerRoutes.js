@@ -941,6 +941,63 @@ router.delete("/salons/:salonId/blocked-slots", (req, res) => {
   res.json({ unblocked: true });
 });
 
+// --- GET this salon's upcoming special closure dates (e.g. holidays) ---
+router.get("/salons/:salonId/closures", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const closures = db
+    .prepare("SELECT * FROM salon_closures WHERE salonId = ? AND date >= ? ORDER BY date ASC")
+    .all(req.params.salonId, todayIso);
+  res.json(closures);
+});
+
+// --- POST mark a whole date as closed, beyond the salon's regular weekly hours ---
+router.post("/salons/:salonId/closures", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  const { date, reason } = req.body;
+  if (!date) return res.status(400).json({ error: "date is required" });
+
+  const existing = db
+    .prepare("SELECT id FROM salon_closures WHERE salonId = ? AND date = ?")
+    .get(req.params.salonId, date);
+  if (existing) return res.status(409).json({ error: "This date is already marked closed" });
+
+  const closure = {
+    id: uuidv4(),
+    salonId: req.params.salonId,
+    date,
+    reason: reason?.trim() || null,
+    createdAt: new Date().toISOString(),
+  };
+  db.prepare(
+    `INSERT INTO salon_closures (id, salonId, date, reason, createdAt) VALUES (@id, @salonId, @date, @reason, @createdAt)`
+  ).run(closure);
+
+  res.status(201).json(closure);
+});
+
+// --- DELETE reopen a previously-closed date ---
+router.delete("/salons/:salonId/closures/:closureId", (req, res) => {
+  const salon = db.prepare("SELECT * FROM salons WHERE id = ?").get(req.params.salonId);
+  if (!salon || salon.ownerId !== req.userId) {
+    return res.status(404).json({ error: "Salon not found" });
+  }
+
+  db.prepare("DELETE FROM salon_closures WHERE id = ? AND salonId = ?").run(
+    req.params.closureId,
+    req.params.salonId
+  );
+  res.json({ deleted: true });
+});
+
 // --- GET dashboard stats for this owner ---
 router.get("/stats", (req, res) => {
   const salons = db.prepare("SELECT id FROM salons WHERE ownerId = ?").all(req.userId);

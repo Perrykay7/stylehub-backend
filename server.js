@@ -410,6 +410,15 @@ app.get("/salons/:id/booked-slots", (req, res) => {
     .prepare("SELECT time FROM blocked_slots WHERE salonId = ? AND date = ?")
     .all(req.params.id, date);
 
+  // A one-off special closure (e.g. a holiday) closes the salon for this date
+  // regardless of its regular weekly hours.
+  const closure = db
+    .prepare("SELECT id FROM salon_closures WHERE salonId = ? AND date = ?")
+    .get(req.params.id, date);
+  if (closure) {
+    return res.json(["CLOSED"]);
+  }
+
   // If the salon is closed on this day of week, return all slots as unavailable
   const dayOfWeek = new Date(date).getDay();
   const dayHours = db

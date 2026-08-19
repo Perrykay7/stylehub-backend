@@ -737,4 +737,18 @@ if (!columnExists("bookings", "reviewReminderSent")) {
   db.exec(`ALTER TABLE bookings ADD COLUMN reviewReminderSent INTEGER NOT NULL DEFAULT 0`);
 }
 
+// --- Migration: one-off special closure dates (e.g. holidays), on top of
+// the salon's regular weekly hours ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS salon_closures (
+    id TEXT PRIMARY KEY,
+    salonId TEXT NOT NULL,
+    date TEXT NOT NULL,
+    reason TEXT,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (salonId) REFERENCES salons(id),
+    UNIQUE (salonId, date)
+  );
+`);
+
 module.exports = db;
