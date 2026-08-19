@@ -231,6 +231,20 @@ router.post("/salons/:salonId/services", (req, res) => {
     `INSERT INTO services (id, salonId, name, durationMins, price, category) VALUES (@id, @salonId, @name, @durationMins, @price, @category)`
   ).run(service);
 
+  // Let customers who've favorited this salon know there's something new to book.
+  const favoritedBy = db
+    .prepare("SELECT userId FROM favorites WHERE salonId = ?")
+    .all(salon.id);
+  favoritedBy.forEach((f) => {
+    notify(
+      f.userId,
+      "New service added ✨",
+      `${salon.name} just added ${name} — GHS ${price}`,
+      "new_service",
+      { salonId: salon.id, serviceId: service.id }
+    );
+  });
+
   res.status(201).json(service);
 });
 
