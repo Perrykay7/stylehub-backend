@@ -428,6 +428,12 @@ app.get("/salons/:id/booked-slots", (req, res) => {
     return res.json(["CLOSED"]);
   }
 
+  // A daily break window (e.g. lunch) blocks just those slots, not the whole day.
+  const breakTimes =
+    dayHours?.breakStart && dayHours?.breakEnd
+      ? generateTimeSlots(dayHours.breakStart, dayHours.breakEnd)
+      : [];
+
   let fullTimes = [];
 
   if (professionalId) {
@@ -484,7 +490,7 @@ app.get("/salons/:id/booked-slots", (req, res) => {
       .map((r) => r.time);
   }
 
-  const allUnavailable = [...new Set([...fullTimes, ...blocked.map((r) => r.time)])];
+  const allUnavailable = [...new Set([...fullTimes, ...blocked.map((r) => r.time), ...breakTimes])];
   res.json(allUnavailable);
 });
 

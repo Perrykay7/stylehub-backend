@@ -765,4 +765,12 @@ if (!columnExists("booking_events", "reason")) {
   db.exec(`ALTER TABLE booking_events ADD COLUMN reason TEXT`);
 }
 
+// --- Migration: optional daily break window (e.g. lunch), per day of week ---
+if (!columnExists("salon_hours", "breakStart")) {
+  db.exec(`ALTER TABLE salon_hours ADD COLUMN breakStart TEXT`);
+}
+if (!columnExists("salon_hours", "breakEnd")) {
+  db.exec(`ALTER TABLE salon_hours ADD COLUMN breakEnd TEXT`);
+}
+
 module.exports = db;

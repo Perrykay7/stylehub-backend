@@ -912,17 +912,29 @@ router.put("/salons/:salonId/hours", (req, res) => {
   if (!salon || salon.ownerId !== req.userId) {
     return res.status(404).json({ error: "Salon not found" });
   }
-  const { hours } = req.body; // array of { dayOfWeek, openTime, closeTime, isClosed }
+  const { hours } = req.body; // array of { dayOfWeek, openTime, closeTime, isClosed, breakStart?, breakEnd? }
   if (!Array.isArray(hours)) return res.status(400).json({ error: "hours array is required" });
 
   const upsert = db.prepare(`
-    INSERT INTO salon_hours (id, salonId, dayOfWeek, openTime, closeTime, isClosed)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(salonId, dayOfWeek) DO UPDATE SET openTime=excluded.openTime, closeTime=excluded.closeTime, isClosed=excluded.isClosed
+    INSERT INTO salon_hours (id, salonId, dayOfWeek, openTime, closeTime, isClosed, breakStart, breakEnd)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(salonId, dayOfWeek) DO UPDATE SET openTime=excluded.openTime, closeTime=excluded.closeTime, isClosed=excluded.isClosed, breakStart=excluded.breakStart, breakEnd=excluded.breakEnd
   `);
   const tx = db.transaction(() => {
     for (const h of hours) {
-      upsert.run(uuidv4(), req.params.salonId, h.dayOfWeek, h.openTime || null, h.closeTime || null, h.isClosed ? 1 : 0);
+      // A break only counts if both ends are given — a lone breakStart/breakEnd
+      // isn't a usable window, so treat it the same as "no break".
+      const hasBreak = !!(h.breakStart && h.breakEnd);
+      upsert.run(
+        uuidv4(),
+        req.params.salonId,
+        h.dayOfWeek,
+        h.openTime || null,
+        h.closeTime || null,
+        h.isClosed ? 1 : 0,
+        hasBreak ? h.breakStart : null,
+        hasBreak ? h.breakEnd : null
+      );
     }
   });
   tx();
