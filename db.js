@@ -773,4 +773,20 @@ if (!columnExists("salon_hours", "breakEnd")) {
   db.exec(`ALTER TABLE salon_hours ADD COLUMN breakEnd TEXT`);
 }
 
+// --- Migration: in-app support tickets ("Report an Issue") ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS support_tickets (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    userName TEXT NOT NULL,
+    userPhone TEXT,
+    userRole TEXT NOT NULL,
+    category TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+`);
+
 module.exports = db;

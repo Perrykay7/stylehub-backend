@@ -15,6 +15,7 @@ const { attachImages } = require("./serviceImages");
 const { attachProfessionalImages } = require("./professionalImages");
 const { attachSalonImages } = require("./salonImages");
 const { attachCustomerServiceContacts } = require("./salonContacts");
+const { sendSms } = require("./smsHelper");
 const { initChatServer, sendMessage, editMessage, deleteMessage, pruneOldMessages } = require("./chat");
 const {
   generateTimeSlots,
@@ -1182,6 +1183,55 @@ app.get("/notifications", requireAuth, (req, res) => {
 app.put("/notifications/read-all", requireAuth, (req, res) => {
   db.prepare("UPDATE notifications SET read = 1 WHERE userId = ? AND read = 0").run(req.userId);
   res.json({ marked: true });
+});
+
+// Keep in sync with SUPPORT_PHONE in app/settings.tsx — the same number
+// customers already see as StyleHub's own support contact.
+const SUPPORT_ALERT_PHONE = "0267031402";
+
+// --- POST submit an in-app support ticket ("Report an Issue") ---
+app.post("/support/tickets", requireAuth, (req, res) => {
+  const { category, message } = req.body;
+  if (!category || typeof message !== "string" || !message.trim()) {
+    return res.status(400).json({ error: "Category and message are required" });
+  }
+
+  const user = db.prepare("SELECT name, phone, role FROM users WHERE id = ?").get(req.userId);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const ticket = {
+    id: uuidv4(),
+    userId: req.userId,
+    userName: user.name,
+    userPhone: user.phone,
+    userRole: user.role,
+    category,
+    message: message.trim().slice(0, 1000),
+    status: "open",
+    createdAt: new Date().toISOString(),
+  };
+
+  db.prepare(
+    `INSERT INTO support_tickets (id, userId, userName, userPhone, userRole, category, message, status, createdAt)
+     VALUES (@id, @userId, @userName, @userPhone, @userRole, @category, @message, @status, @createdAt)`
+  ).run(ticket);
+
+  sendSms(
+    SUPPORT_ALERT_PHONE,
+    `StyleHub ticket [${ticket.category}] from ${ticket.userName} (${ticket.userRole}, ${ticket.userPhone}): ${ticket.message.slice(0, 200)}`
+  );
+
+  res.status(201).json({ id: ticket.id });
+});
+
+// --- GET all support tickets (StyleHub admin only, via shared secret) ---
+app.get("/support/tickets", (req, res) => {
+  const secret = req.headers["x-cron-secret"];
+  if (!secret || secret !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const tickets = db.prepare("SELECT * FROM support_tickets ORDER BY createdAt DESC").all();
+  res.json(tickets);
 });
 
 // --- GET the logged-in user's notification channel preferences ---
