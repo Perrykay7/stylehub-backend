@@ -811,9 +811,11 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     });
   }
 
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 100) : null;
+
   db.prepare(
-    `INSERT INTO booking_events (id, bookingId, salonId, serviceId, professionalId, price, date, eventType, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'cancelled', ?)`
+    `INSERT INTO booking_events (id, bookingId, salonId, serviceId, professionalId, price, date, eventType, createdAt, reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'cancelled', ?, ?)`
   ).run(
     uuidv4(),
     booking.id,
@@ -822,7 +824,8 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     booking.professionalId,
     booking.price,
     booking.date,
-    new Date().toISOString()
+    new Date().toISOString(),
+    reason || null
   );
 
   db.prepare("DELETE FROM bookings WHERE id = ?").run(req.params.id);
@@ -834,7 +837,7 @@ app.delete("/bookings/:id", requireAuth, (req, res) => {
     notify(
       salon.ownerId,
       "Booking Cancelled ❌",
-      `${customer?.name || "A customer"} cancelled ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}`,
+      `${customer?.name || "A customer"} cancelled ${booking.serviceName} on ${booking.dateLabel} at ${booking.time}${reason ? ` — Reason: ${reason}` : ""}`,
       "booking_cancelled",
       { bookingId: booking.id }
     );

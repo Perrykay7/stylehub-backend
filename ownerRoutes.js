@@ -1142,6 +1142,14 @@ router.get("/salons/:salonId/analytics", (req, res) => {
   const totalAttempted = activeBookingCount + cancelledCount;
   const cancellationRate = totalAttempted > 0 ? cancelledCount / totalAttempted : 0;
 
+  const cancellationReasons = db
+    .prepare(
+      `SELECT reason, COUNT(*) as count FROM booking_events
+       WHERE salonId = ? AND eventType = 'cancelled' AND date >= ? AND reason IS NOT NULL AND reason != ''
+       GROUP BY reason ORDER BY count DESC`
+    )
+    .all(salonId, sinceIso);
+
   const pastBookingsCount = db
     .prepare(
       `SELECT COUNT(*) as count FROM bookings WHERE salonId = ? AND date >= ? AND date < ?`
@@ -1190,6 +1198,7 @@ router.get("/salons/:salonId/analytics", (req, res) => {
     revenueOverTime,
     cancellationRate,
     cancelledCount,
+    cancellationReasons,
     noShowRate,
     noShowCount,
     perProfessional,

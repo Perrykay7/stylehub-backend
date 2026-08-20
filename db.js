@@ -760,4 +760,9 @@ if (!columnExists("salons", "longitude")) {
   db.exec(`ALTER TABLE salons ADD COLUMN longitude REAL`);
 }
 
+// --- Migration: optional reason a customer gives when cancelling a booking ---
+if (!columnExists("booking_events", "reason")) {
+  db.exec(`ALTER TABLE booking_events ADD COLUMN reason TEXT`);
+}
+
 module.exports = db;
